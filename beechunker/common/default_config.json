@@ -17,6 +17,6 @@
         "som_iterations": 5000
     },
     "beegfs": {
-        "mount_points": []
+        "mount_points": ["/mnt/beegfs"]
     }
 }

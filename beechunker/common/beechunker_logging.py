@@ -28,6 +28,6 @@ def setup_logging(component):
             handlers=[logging.StreamHandler()]
         )
     
-    logger = logging.getLogger(f"chunkflow.{component}")
+    logger = logging.getLogger(f"beechunker.{component}")
     logger.info(f"Initialized logging for {component}")
     return logger

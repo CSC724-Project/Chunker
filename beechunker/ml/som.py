@@ -25,6 +25,40 @@ class BeeChunkerSOM:
         self.models_dir = config.get("ml", "models_dir") 
         os.makedirs(self.models_dir, exist_ok=True)
     
+    def set_last_training_time(self):
+        with open(os.path.join(self.models_dir, "last_training_time.txt"), "w") as f:
+            f.write(datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+    
+    def get_last_training_time(self):
+        try:
+            with open(os.path.join(self.models_dir, "last_training_time.txt"), "r") as f:
+                last_training_time = f.read().strip()
+            return datetime.strptime(last_training_time, "%Y-%m-%d %H:%M:%S")
+        except FileNotFoundError:
+            logger.warning("Last training time file not found. Returning None.")
+            return None
+        except Exception as e:
+            logger.error(f"Error reading last training time: {e}")
+            return None
+    
+    def get_new_data_count(self, last_training_time):
+        """
+        Get the number of new data points since the last training time.
+        Args:
+            last_training_time (datetime): Last training time.
+        Returns:
+            int: Number of new data points.
+        """
+        try:
+            # Load the data
+            df = pd.read_csv(config.get("ml", "log_path"))
+            # Filter the data based on the last training time
+            new_data_count = len(df[df['timestamp'] > last_training_time])
+            return new_data_count
+        except Exception as e:
+            logger.error(f"Error getting new data count: {e}")
+            return 0
+    
     
     def train(self, df) -> bool:
         """
@@ -231,7 +265,7 @@ class BeeChunkerSOM:
             self.chunk_size_map = np.load(map_path)
             
             with open(features_path, 'r') as f:
-                self.feature_names = f.read().strip().split(',')
+                self.feature_names = f.read().strip().split('\n')
             
             logger.info("Successfully loaded SOM model")
             return True
