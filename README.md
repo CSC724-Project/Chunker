@@ -13,3 +13,7 @@ A dynamic BeeGFS chunk size optimization system using Self-Organizing Maps.
 
 ```bash
 pip install -e .
+```
+
+## Architecture
+![Alt text](architecture.png)
