@@ -13,7 +13,8 @@
         "models_dir": "/opt/beechunker/data/models",
         "log_path": "/opt/beechunker/data/logs/trainer.log",
         "training_interval": 86400,
-        "min_training_samples": 100
+        "min_training_samples": 100,
+        "som_iterations": 5000
     },
     "beegfs": {
         "mount_points": []
