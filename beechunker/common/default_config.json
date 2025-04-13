@@ -1,0 +1,21 @@
+{
+    "monitor": {
+        "db_path": "/opt/beechunker/data/access_patterns.db",
+        "log_path": "/opt/beechunker/data/logs/monitor.log",
+        "polling_interval": 300
+    },
+    "optimizer": {
+        "log_path": "/opt/beechunker/data/logs/optimizer.log",
+        "min_chunk_size": 512,
+        "max_chunk_size": 4096
+    },
+    "ml": {
+        "models_dir": "/opt/beechunker/data/models",
+        "log_path": "/opt/beechunker/data/logs/trainer.log",
+        "training_interval": 86400,
+        "min_training_samples": 100
+    },
+    "beegfs": {
+        "mount_points": []
+    }
+}
