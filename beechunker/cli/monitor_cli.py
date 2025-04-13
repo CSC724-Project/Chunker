@@ -290,6 +290,41 @@ def stats():
         if 'conn' in locals():
             conn.close()
 
+@cli.command()
+def get_chunk_size():
+    """Get the chunk size of a file."""
+    logger = setup_logging("monitor")
+    
+    # Initialize database
+    db_path = config.get("monitor", "db_path")
+    logger.info(f"Using database at {db_path}")
+    
+    if not os.path.exists(db_path):
+        logger.error(f"Database not found: {db_path}")
+        sys.exit(1)
+    
+    # Connect to database
+    try:
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+        
+        # Get chunk size for a specific file
+        file_path = input("Enter the file path: ")
+        cursor.execute("SELECT chunk_size FROM file_metadata WHERE file_path = ?", (file_path,))
+        row = cursor.fetchone()
+        
+        if row:
+            click.echo(f"Chunk size for {file_path}: {row[0]} KB")
+        else:
+            click.echo(f"No chunk size information found for {file_path}")
+        
+    except Exception as e:
+        logger.error(f"Error getting chunk size: {e}")
+        sys.exit(1)
+    finally:
+        if 'conn' in locals():
+            conn.close()
+
 def main():
     """Main entry point for the monitor CLI."""
     cli()
