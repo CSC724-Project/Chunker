@@ -145,9 +145,7 @@ class BeeChunkerSOM:
             # If actual_chunk_size exists but chunk_size doesn't, use it as the target
             if 'chunk_size' not in df.columns and 'actual_chunk_size' in df.columns:
                 df['chunk_size'] = df['actual_chunk_size']
-                # Only try to remove if it's actually in the list
-                if 'actual_chunk_size' in feature_columns:
-                    feature_columns.remove('actual_chunk_size')
+                feature_columns.remove('actual_chunk_size')
         else:
             # Original feature engineering for standard data format
             logger.info("Using standard feature engineering for training")
@@ -176,7 +174,7 @@ class BeeChunkerSOM:
             
             # Remove features that don't exist in the dataset
             feature_columns = [col for col in feature_columns if col in df.columns]
-    
+        
         # Make sure all values are numeric
         for col in feature_columns:
             if df[col].dtype == 'object':
@@ -326,8 +324,6 @@ class BeeChunkerSOM:
             
             # Get chunk size from map
             chunk_size = self.chunk_size_map[bmu]
-            
-            logger.info(f"BMU: {bmu}, Chunk size: {chunk_size}")
             
             # Round to the nearest valid chunk size (multiples of 512KB)
             min_chunk = config.get("optimizer", "min_chunk_size")
