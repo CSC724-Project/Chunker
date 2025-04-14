@@ -1,38 +1,4 @@
-### Service Management
-
-After setting up the systemd services, you can manage them as follows:
-
-Start all services:
-
-```bash
-sudo systemctl start beechunker-monitor
-sudo systemctl start beechunker-optimizer
-```
-
-Stop all services:
-
-```bash
-sudo systemctl stop beechunker-monitor
-sudo systemctl stop beechunker-optimizer
-```
-
-Purge all BeeChunker data (use with caution):
-
-```bash
-# Stop all services first
-sudo systemctl stop beechunker-monitor
-sudo systemctl stop beechunker-optimizer
-
-# Remove database and logs
-sudo rm -rf /opt/beechunker/data/access_patterns.db
-sudo rm -rf /opt/beechunker/data/logs/*
-
-# Remove trained models
-sudo rm -rf /opt/beechunker/data/models/*
-
-# Reset configuration (optional)
-sudo cp beechunker/common/default_config.json /opt/beechunker/data/config.json
-```# BeeChunker
+# BeeChunker
 
 **Intelligent Chunk Size Optimization for BeeGFS using Self-Organizing Maps**
 
@@ -242,6 +208,42 @@ sudo systemctl start beechunker-optimizer
 
 Note: You may need to adjust the paths in the ExecStart lines if your beechunker executables are installed in a different location. You can find the actual location with `which beechunker-optimizer`.
 
+### Service Management
+
+After setting up the systemd services, you can manage them as follows:
+
+Start all services:
+
+```bash
+sudo systemctl start beechunker-monitor
+sudo systemctl start beechunker-optimizer
+```
+
+Stop all services:
+
+```bash
+sudo systemctl stop beechunker-monitor
+sudo systemctl stop beechunker-optimizer
+```
+
+Purge all BeeChunker data (use with caution):
+
+```bash
+# Stop all services first
+sudo systemctl stop beechunker-monitor
+sudo systemctl stop beechunker-optimizer
+
+# Remove database and logs
+sudo rm -rf /opt/beechunker/data/access_patterns.db
+sudo rm -rf /opt/beechunker/data/logs/*
+
+# Remove trained models
+sudo rm -rf /opt/beechunker/data/models/*
+
+# Reset configuration (optional)
+sudo cp beechunker/common/default_config.json /opt/beechunker/data/config.json
+```
+
 ### Monitor Service
 
 The monitoring service tracks file access patterns in your BeeGFS file system.
@@ -401,7 +403,6 @@ beechunker/
 3. **SOM Training**: The SOM learns correlations between file features and optimal chunk sizes.
 
 4. **Optimization**: Files are analyzed and their chunk sizes are optimized using BeeGFS commands.
-
 
 ## Troubleshooting
 
