@@ -207,7 +207,3 @@ Default configuration is stored in `/opt/beechunker/data/config.json`:
 - BeeGFS installation
 - Access to BeeGFS command-line tools
 - Root or sudo access (for some operations)
-
-## License
-
-MIT License
