@@ -14,6 +14,41 @@ def cli():
     pass
 
 @cli.command()
+@click.option('--interval', '-i', type=int, default=300, help='Scanning interval in seconds')
+@click.option('--min-access', type=int, default=5, help='Minimum number of accesses to consider')
+@click.option('--dry-run', '-d', is_flag=True, help='Do not actually change chunk sizes')
+def run(interval, min_access, dry_run):
+    """Run the optimizer service continuously."""
+    logger = setup_logging("optimizer")
+    logger.info(f"Starting BeeChunker optimizer service (scan interval: {interval}s)")
+    
+    try:
+        optimizer = ChunkSizeOptimizer()
+        
+        while True:
+            logger.info("Starting optimization scan")
+            
+            # Build query parameters for bulk optimization
+            query_params = {
+                'min_access': min_access
+            }
+            
+            # Run bulk optimization
+            optimized, failed = optimizer.bulk_optimize(query_params, dry_run=dry_run)
+            
+            logger.info(f"Scan complete: {optimized} files optimized, {failed} failed")
+            logger.info(f"Sleeping for {interval} seconds")
+            
+            # Sleep until next scan
+            time.sleep(interval)
+            
+    except KeyboardInterrupt:
+        logger.info("Optimizer service stopped by user")
+    except Exception as e:
+        logger.error(f"Optimizer service error: {e}")
+        sys.exit(1)
+
+@cli.command()
 @click.argument('file_path', type=click.Path(exists=True))
 @click.option('--force', '-f', is_flag=True, help='Force optimization even if current size is optimal')
 @click.option('--dry-run', '-d', is_flag=True, help='Do not actually change chunk sizes')
