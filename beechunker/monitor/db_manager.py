@@ -6,7 +6,6 @@ import sqlite3
 import logging
 import time
 from pathlib import Path
-from typing import List, Dict, Any, Optional
 
 class DBManager:
     """
