@@ -1,4 +1,5 @@
 import os
+import re
 import sqlite3
 import subprocess
 import time
@@ -150,9 +151,11 @@ class ChunkSizeOptimizer:
             )
             
             current_chunk_size = None
+            chunk_size_pattern = re.compile(r'[Cc]hunk[Ss]ize:\s*(\d+)([KMGkmg]?)')
             
             for line in result.stdout.splitlines():
-                if "ChunkSize:" in line:
+                match = chunk_size_pattern.search(line)
+                if match: # updated to use regex for better matching
                     chunk_info = line.strip().split(":")[-1].strip()
             
             # Parse the chunk size
