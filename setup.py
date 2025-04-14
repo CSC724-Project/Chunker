@@ -22,8 +22,8 @@ setup(
         'console_scripts': [
             'beechunker-monitor=beechunker.cli.monitor_cli:main',
             'beechunker-optimizer=beechunker.cli.optimizer_cli:main',
-            'beechunker-train=beechunker.cli.cli:main',
-            'beechunker=beechunker.cli.cli:main',
+            'beechunker-train=beechunker.cli.trainer_cli:main',
+            'beechunker=beechunker.cli.monitor_cli:main',  # Default command
         ],
     },
     python_requires='>=3.8',
