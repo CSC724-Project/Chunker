@@ -6,7 +6,7 @@
     },
     "optimizer": {
         "log_path": "/opt/beechunker/data/logs/optimizer.log",
-        "min_chunk_size": 512,
+        "min_chunk_size": 64,
         "max_chunk_size": 4096
     },
     "ml": {
