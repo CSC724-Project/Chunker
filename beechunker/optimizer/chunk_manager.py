@@ -44,15 +44,22 @@ class ChunkSizeOptimizer:
             
             cursor.execute("""
                 SELECT 
-                    COUNT(id) as access_count,
-                    AVG(read_size) as avg_read_size,
-                    AVG(write_size) as avg_write_size,
-                    MAX(read_size) as max_read_size,
-                    MAX(write_size) as max_write_size,
-                    COUNT(CASE WHEN access_type = 'read' THEN 1 END) as read_count,
-                    COUNT(CASE WHEN access_type = 'write' THEN 1 END) as write_count
-                FROM file_access
-                WHERE file_path = ?
+                    m.file_path,
+                    m.file_size,
+                    m.chunk_size,
+                    COUNT(a.id) as access_count,
+                    AVG(a.read_size) as avg_read_size,
+                    AVG(a.write_size) as avg_write_size,
+                    MAX(a.read_size) as max_read_size,
+                    MAX(a.write_size) as max_write_size,
+                    COUNT(CASE WHEN a.access_type = 'read' THEN 1 END) as read_count,
+                    COUNT(CASE WHEN a.access_type = 'write' THEN 1 END) as write_count,
+                    AVG(t.throughput_mbps) as throughput_mbps
+                FROM file_metadata m
+                LEFT JOIN file_access a ON m.file_path = a.file_path
+                LEFT JOIN throughput_metrics t ON m.file_path = t.file_path
+                WHERE m.file_path = ?
+                GROUP BY m.file_path
             """, (file_path,))
             
             row = cursor.fetchone()
@@ -67,13 +74,15 @@ class ChunkSizeOptimizer:
                     avg_write_size = 4096
                     max_read_size = 8192
                     max_write_size = 8192
-                elif file_size < 1024 * 1024 * 100: # 100 
+                    throughput_mbps = 50.0  # Default small file throughput
+                elif file_size < 1024 * 1024 * 100: # 100 MB
                     avg_read_size = 65536
                     avg_write_size = 32768
                     max_read_size = 131072
                     max_write_size = 65536
                     read_count = 20
                     write_count = 10
+                    throughput_mbps = 100.0  # Default medium file throughput
                 else:  # Large files (>=100MB)
                     avg_read_size = 1048576
                     avg_write_size = 524288
@@ -81,20 +90,25 @@ class ChunkSizeOptimizer:
                     max_write_size = 1048576
                     read_count = 50
                     write_count = 20
+                    throughput_mbps = 150.0  # Default large file throughput
                 
                 access_count = read_count + write_count
             else:
-                access_count = row[0] or 1
-                avg_read_size = row[1] or 4096
-                avg_write_size = row[2] or 4096
-                max_read_size = row[3] or avg_read_size * 2
-                max_write_size = row[4] or avg_write_size * 2
-                read_count = row[5] or 0
-                write_count = row[6] or 0
-            
+                file_path = row[0]
+                file_size = row[1]
+                chunk_size = row[2]
+                access_count = row[3] or 1
+                avg_read_size = row[4] or 4096
+                avg_write_size = row[5] or 4096
+                max_read_size = row[6] or avg_read_size * 2
+                max_write_size = row[7] or avg_write_size * 2
+                read_count = row[8] or 0
+                write_count = row[9] or 0
+                throughput_mbps = row[10] or 100.0
+
             # Calculate read/write ratio
             read_write_ratio = read_count / max(1, write_count)
-            
+
             # Prepare features for prediction
             features = {
                 'file_size': file_size,
@@ -106,7 +120,8 @@ class ChunkSizeOptimizer:
                 'write_count': write_count,
                 'access_count': access_count,
                 'read_write_ratio': read_write_ratio,
-                'dir_depth': dir_depth
+                'dir_depth': dir_depth,
+                'throughput_mbps': throughput_mbps  # Add the throughput feature
             }
             
             # Add file extension as a feature
