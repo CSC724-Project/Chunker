@@ -125,16 +125,29 @@ class ChunkSizeOptimizer:
         try:
             # Get file features
             features = self.get_file_features(file_path)
+            if features is None:
+                raise ValueError(f"Failed to extract features from {file_path}")
+                
+            # Convert dictionary to DataFrame for SOM prediction
+            import pandas as pd
+            df = pd.DataFrame([features])
+            df['file_path'] = file_path
+            df['chunk_size'] = self.get_current_chunk_size(file_path) * 1024  # Convert KB to bytes to match expected format
             
             # Predict chunk size using the SOM model
-            chunk_size = self.som.predict(features)
+            predictions = self.som.predict(df)
+            
+            if predictions is None or len(predictions) == 0:
+                raise ValueError("SOM prediction failed")
+                
+            # Extract the predicted chunk size from the result
+            optimal_chunk_size = int(predictions.iloc[0]['predicted_chunk_size'])
             
             # Log the predicted chunk size
-            self.logger.info(f"Predicted chunk size for {file_path}: {chunk_size}KB")
+            self.logger.info(f"Predicted chunk size for {file_path}: {optimal_chunk_size}KB")
             self.logger.info(f"Features used for prediction: {features}")
             
-            return chunk_size
-                
+            return optimal_chunk_size
                 
         except Exception as e:
             self.logger.error(f"Error predicting chunk size for {file_path}: {e}")
