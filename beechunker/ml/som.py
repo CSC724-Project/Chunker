@@ -9,6 +9,7 @@ from sklearn.preprocessing import MinMaxScaler
 import matplotlib.pyplot as plt
 
 from beechunker.common.config import config
+from beechunker.ml.feature_engineering import FeatureEngineering
 
 logger = setup_logging("som")
 
@@ -23,6 +24,7 @@ class BeeChunkerSOM:
         self.chunk_size_map = None
         self.feature_names = None
         self.models_dir = config.get("ml", "models_dir") 
+        self.feature_engine = FeatureEngineering()
         os.makedirs(self.models_dir, exist_ok=True)
     
     def set_last_training_time(self):
@@ -58,135 +60,182 @@ class BeeChunkerSOM:
         except Exception as e:
             logger.error(f"Error getting new data count: {e}")
             return 0
-    
-    
-    def train(self, df) -> bool:
+        
+    def train(self, input_data) -> bool:
         """
-        Train the SOM on the provided DataFrame.
+        Train the SOM on the provided data.
 
         Args:
-            df (pandas dataframe): DataFrame with features and chunk sizes.
+            input_data: Either a file path (str) or a DataFrame with features and chunk sizes.
+        Returns:
+            bool: True if training was successful, False otherwise.
         """
         logger.info("Starting SOM training")
         
-        if len(df) < config.get("ml", "min_training_samples"):
-            logger.warning("Not enough samples for training the SOM. Need at least %d samples.", config.get("ml", "min_training_samples"))
-            return False
-        
-        # Extract features and chunk sizes
-        X, y, self.feature_names = self._extract_features(df)
-        
-        # Scale the features
-        self.scaler = MinMaxScaler()
-        X_scaled = self.scaler.fit_transform(X)
-        
-        # Save scaler and feature names
-        joblib.dump(self.scaler, os.path.join(self.models_dir, "scaler.joblib"))
-        with open(os.path.join(self.models_dir, "feature_names.txt"), "w") as f:
-            f.write("\n".join(self.feature_names))
-        logger.info("Features and chunk sizes extracted and scaled")
-        
-        # Determine the SOM size based on data points
-        # Rule of thumb : map units = 5 * sqrt(n_samples)
-        map_size = int(np.ceil(5 * np.sqrt(len(X)))) # using X here instead of X_scaled because we need the original data for visualization
-        # Make it a square
-        map_size = min(max(map_size, 10), 30)
-        logger.info("SOM map size: %d", map_size)
-        
-        # Init and train the SOM
-        self.som = MiniSom(
-            map_size, map_size,
-            X_scaled.shape[1],
-            sigma=1.0, # Initial neighborhood radius
-            learning_rate=0.5, # Initial learning rate
-            neighborhood_function='gaussian',
-            random_seed=42
-        )
-        
-        
-        self.som.random_weights_init(X_scaled)
-        
-        self.som.train_batch(
-            X_scaled,
-            num_iteration=config.get("ml", "som_iterations"),
-            verbose=True
-        )
-        
-        # Create chunk size map
-        self._create_chunk_size_map(X_scaled, y)
-        logger.info("SOM training completed")
-        
-        # Save the trained SOM model
-        joblib.dump(self.som, os.path.join(self.models_dir, "som_model.joblib"))
-        np.save(os.path.join(self.models_dir, "chunk_size_map.npy"), self.chunk_size_map)
-        
-        # Create visualizations
-        self._create_visualizations(X_scaled, y, df)
-        
-        # calculate the quantization error
-        qe = self.som.quantization_error(X_scaled)
-        logger.info("Quantization error: %f", qe)
-        
-        return True
-    
-    def _extract_features(self, df):
-        """Extract and engineer features for training - supports both original and simplified data."""
-        # Check if we're dealing with simplified data (categorical features)
-        is_simplified = ('file_size_cat' in df.columns or 'chunk_size_cat' in df.columns)
-        
-        if is_simplified:
-            # For simplified categorical data
-            logger.info("Using simplified categorical features for training")
+        # If input_data is a DataFrame, check the sample count
+        if isinstance(input_data, pd.DataFrame):
+            df = input_data
+            if len(df) < config.get("ml", "min_training_samples"):
+                logger.warning("Not enough samples for training the SOM. Need at least %d samples.", 
+                            config.get("ml", "min_training_samples"))
+                return False
             
-            # Get all numeric columns except chunk_size (our target)
-            feature_columns = [col for col in df.columns 
-                            if col != 'chunk_size' and col != 'actual_chunk_size']
+            # Save the DataFrame to a temporary file for processing
+            temp_csv_path = os.path.join(self.models_dir, "temp_training_data.csv")
+            df.to_csv(temp_csv_path, index=False)
+            logger.info(f"Saved input DataFrame to temporary file: {temp_csv_path}")
             
-            # If actual_chunk_size exists but chunk_size doesn't, use it as the target
-            if 'chunk_size' not in df.columns and 'actual_chunk_size' in df.columns:
-                df['chunk_size'] = df['actual_chunk_size']
-                # Only try to remove if it's actually in the list
-                if 'actual_chunk_size' in feature_columns:
-                    feature_columns.remove('actual_chunk_size')
+            # Use the file path with the clean method
+            input_path = temp_csv_path
         else:
-            # Original feature engineering for standard data format
-            logger.info("Using standard feature engineering for training")
+            # Assume input_data is a file path
+            input_path = input_data
             
-            # Feature engineering
-            df['read_write_ratio'] = df['read_count'] / (df['write_count'] + 1)  # Avoid division by zero
+            # Check if the file exists
+            if not os.path.exists(input_path):
+                logger.error(f"Input file not found: {input_path}")
+                return False
             
-            # Extract file extension
-            if 'file_path' in df.columns:
-                df['file_extension'] = df['file_path'].apply(lambda x: os.path.splitext(x)[1].lower())
-                
-                # One-hot encode common extensions
-                common_extensions = ['.txt', '.csv', '.log', '.dat', '.bin', '.json', '.xml', '.db']
-                for ext in common_extensions:
-                    df[f'ext_{ext}'] = (df['file_extension'] == ext).astype(int)
-                df['ext_other'] = (~df['file_extension'].isin(common_extensions)).astype(int)
-                
-                # Directory depth
-                df['dir_depth'] = df['file_path'].apply(lambda x: len(x.split('/')))
+            # Check the sample count from the file
+            try:
+                df_check = pd.read_csv(input_path)
+                if len(df_check) < config.get("ml", "min_training_samples"):
+                    logger.warning("Not enough samples for training the SOM. Need at least %d samples.", 
+                                config.get("ml", "min_training_samples"))
+                    return False
+            except Exception as e:
+                logger.error(f"Error checking input file: {e}")
+                return False
+        
+        try:
+            # Clean and preprocess the data using the FeatureEngineering class
+            df_clean = self.feature_engine.clean(input_path)
             
-            # Select features
-            feature_columns = ['file_size', 'access_count', 'avg_read_size', 'avg_write_size', 
-                            'max_read_size', 'max_write_size', 'read_count', 'write_count', 
-                            'read_write_ratio', 'dir_depth'] + \
-                            [f'ext_{ext}' for ext in common_extensions] + ['ext_other']
+            # Extract features and chunk sizes
+            X, y, self.feature_names = self._extract_features_from_preprocessed(df_clean)
             
-            # Remove features that don't exist in the dataset
-            feature_columns = [col for col in feature_columns if col in df.columns]
+            # Scale the features
+            self.scaler = MinMaxScaler()
+            X_scaled = self.scaler.fit_transform(X)
+            
+            # Save scaler, PCA model and feature names
+            joblib.dump(self.scaler, os.path.join(self.models_dir, "som_scaler.joblib"))
+            pca_model_path = 'pca_model.joblib'
+            if os.path.exists(pca_model_path):
+                # Copy PCA model from the source location to the models directory
+                import shutil
+                target_path = os.path.join(self.models_dir, "pca_model.joblib")
+                shutil.copy2(pca_model_path, target_path)
+                logger.info(f"Copied PCA model to {target_path}")
+            
+            with open(os.path.join(self.models_dir, "feature_names.txt"), "w") as f:
+                f.write("\n".join(self.feature_names))
+            logger.info("Features and chunk sizes extracted and scaled")
+            
+            # Determine the SOM size based on data points
+            # Rule of thumb : map units = 5 * sqrt(n_samples)
+            map_size = int(np.ceil(5 * np.sqrt(len(X))))
+            # Make it a square
+            map_size = min(max(map_size, 10), 30)
+            logger.info("SOM map size: %d", map_size)
+            
+            # Init and train the SOM
+            self.som = MiniSom(
+                map_size, map_size,
+                X_scaled.shape[1],
+                sigma=1.0, # Initial neighborhood radius
+                learning_rate=0.5, # Initial learning rate
+                neighborhood_function='gaussian',
+                random_seed=42
+            )
+            
+            self.som.random_weights_init(X_scaled)
+            
+            self.som.train_batch(
+                X_scaled,
+                num_iteration=config.get("ml", "som_iterations"),
+                verbose=True
+            )
+            
+            # Create chunk size map
+            self._create_chunk_size_map(X_scaled, y)
+            logger.info("SOM training completed")
+            
+            # Save the trained SOM model
+            joblib.dump(self.som, os.path.join(self.models_dir, "som_model.joblib"))
+            joblib.dump(self.chunk_size_map, os.path.join(self.models_dir, "som_chunk_size_map.joblib"))
+            
+            # Create visualizations
+            self._create_visualizations(X_scaled, y, df_clean)
+            
+            # Calculate the quantization error
+            qe = self.som.quantization_error(X_scaled)
+            logger.info("Quantization error: %f", qe)
+            
+            # Set the last training time
+            self.set_last_training_time()
+            
+            # Clean up temporary file if it was created
+            if isinstance(input_data, pd.DataFrame) and os.path.exists(temp_csv_path):
+                os.remove(temp_csv_path)
+                logger.info(f"Removed temporary file: {temp_csv_path}")
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error during SOM training: {e}")
+            # Clean up temporary file if there was an error
+            if isinstance(input_data, pd.DataFrame):
+                temp_csv_path = os.path.join(self.models_dir, "temp_training_data.csv")
+                if os.path.exists(temp_csv_path):
+                    os.remove(temp_csv_path)
+                    logger.info(f"Removed temporary file: {temp_csv_path}")
+            return False
     
-        # Make sure all values are numeric
-        for col in feature_columns:
-            if df[col].dtype == 'object':
-                logger.warning(f"Converting column {col} to numeric")
-                df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+    def _extract_features_from_preprocessed(self, df_clean):
+        """
+        Extract features from preprocessed data.
         
-        X = df[feature_columns]
-        y = df['chunk_size']
+        Args:
+            df_clean (pandas.DataFrame): Preprocessed dataframe from feature engineering
         
-        return X, y, feature_columns
+        Returns:
+            tuple: (X, y, feature_names) - features, target, and feature names
+        """
+        # Get PCA transformed data if available
+        try:
+            # Try to load PCA model if it exists
+            pca_model_path = os.path.join(self.models_dir, "pca_model.joblib")
+            if not os.path.exists(pca_model_path):
+                pca_model_path = 'pca_model.joblib'  # Fallback to current directory
+            
+            if os.path.exists(pca_model_path):
+                # Create a temporary scaler just for PCA transformation
+                temp_scaler = MinMaxScaler()
+                temp_scaler.fit(df_clean.select_dtypes(include=['number']).values)
+                
+                # Get PCA features
+                X_pca = self.feature_engine.prepare_features_for_pca(df_clean, temp_scaler, pca_model_path)
+                feature_names = [f'PC{i+1}' for i in range(X_pca.shape[1])]
+                
+                logger.info(f"Using PCA features for SOM training: {len(feature_names)} components")
+                return X_pca, df_clean['chunk_size_kb'], feature_names
+            
+        except Exception as e:
+            logger.warning(f"Error using PCA features, falling back to standard features: {e}")
+        
+        # Fallback to standard features if PCA fails
+        logger.info("Using standard features for SOM training")
+        
+        # Remove non-numeric columns and target variable
+        numeric_cols = df_clean.select_dtypes(include=['number']).columns
+        feature_cols = [col for col in numeric_cols 
+                       if col != 'chunk_size' and col != 'chunk_size_kb']
+        
+        X = df_clean[feature_cols].values
+        y = df_clean['chunk_size_kb']
+        
+        return X, y, feature_cols
     
     def _create_chunk_size_map(self, X_scaled, y):
         """Create a map of chunk sizes by finding the most common chunk size for each node."""
@@ -279,11 +328,11 @@ class BeeChunkerSOM:
             logger.error(f"Error creating SOM visualization: {e}")
     
     def load(self):
-        """Load trained SOM model."""
+        """Load trained SOM model and components."""
         try:
             model_path = os.path.join(self.models_dir, "som_model.joblib")
-            scaler_path = os.path.join(self.models_dir, "scaler.joblib")
-            map_path = os.path.join(self.models_dir, "chunk_size_map.npy")
+            scaler_path = os.path.join(self.models_dir, "som_scaler.joblib")
+            map_path = os.path.join(self.models_dir, "som_chunk_size_map.joblib")
             features_path = os.path.join(self.models_dir, "feature_names.txt")
             
             if not all(os.path.exists(p) for p in [model_path, scaler_path, map_path]):
@@ -292,7 +341,7 @@ class BeeChunkerSOM:
             
             self.som = joblib.load(model_path)
             self.scaler = joblib.load(scaler_path)
-            self.chunk_size_map = np.load(map_path)
+            self.chunk_size_map = joblib.load(map_path)
             
             with open(features_path, 'r') as f:
                 self.feature_names = f.read().strip().split('\n')
@@ -304,45 +353,179 @@ class BeeChunkerSOM:
             logger.error(f"Error loading SOM model: {e}")
             return False
         
-    
-    def predict(self, features):
-        """Predict optimal chunk size for given features."""
-        if self.som is None or self.chunk_size_map is None:
+        
+    def predict(self, df):
+        """
+        Predict optimal chunk sizes for the given dataframe.
+        
+        Args:
+            df (pandas.DataFrame): Dataframe with raw features
+                
+        Returns:
+            pandas.DataFrame: Dataframe with predictions
+        """
+        if self.som is None or self.chunk_size_map is None or self.scaler is None:
             if not self.load():
                 logger.error("SOM model not loaded. Cannot predict.")
-                return config.get("ml", "min_chunk_size")
+                return None
         
         try:
-            # Prep the features
-            feature_vector = []
-            for feature in self.feature_names:
-                feature_vector.append(features.get(feature, 0))
+            # Try to load PCA model if it exists
+            pca_model_path = os.path.join(self.models_dir, "pca_model.joblib")
+            pca_model = None
             
-            # Scale the features
-            X_scaled = self.scaler.transform([feature_vector])
+            if os.path.exists(pca_model_path):
+                try:
+                    pca_model = joblib.load(pca_model_path)
+                    logger.info("Successfully loaded PCA model for prediction")
+                except Exception as e:
+                    logger.error(f"Error loading PCA model: {e}")
             
-            # Find the best matching unit (BMU)
-            bmu = self.som.winner(X_scaled[0])
+            # Prepare features for prediction
+            X = self.feature_engine.prepare_features_for_pca(df, self.scaler, pca_model_path)
             
-            # Get chunk size from map
-            chunk_size = self.chunk_size_map[bmu]
+            # Scale features
+            X_scaled = self.scaler.transform(X)
             
-            logger.info(f"BMU: {bmu}, Chunk size: {chunk_size}")
+            # Predict for each row
+            predictions = []
+            for i, x in enumerate(X_scaled):
+                # Find the best matching unit (BMU)
+                bmu = self.som.winner(x)
+                
+                # Get the chunk size from the map
+                predicted_chunk_size = self.chunk_size_map[bmu]
+                
+                # Convert to KB if it's in bytes
+                if predicted_chunk_size > 10000:  # Likely in bytes
+                    predicted_chunk_size = predicted_chunk_size / 1024
+                
+                # Round to nearest 128KB (typical chunk size increments in BeeGFS)
+                predicted_chunk_size_kb = round(predicted_chunk_size / 128) * 128
+                
+                # Ensure it's in a reasonable range
+                # Use the correct config access method based on your config structure
+                min_chunk = config.get("optimizer").get("min_chunk_size", 128)
+                max_chunk = config.get("optimizer").get("max_chunk_size", 8192)
+                predicted_chunk_size_kb = max(min_chunk, min(predicted_chunk_size_kb, max_chunk))
+                
+                # Store prediction
+                predictions.append({
+                    'file_path': df.iloc[i]['file_path'],
+                    'file_size': df.iloc[i]['file_size'],
+                    'current_chunk_size': df.iloc[i]['chunk_size'] // 1024,  # Convert to KB
+                    'predicted_chunk_size': predicted_chunk_size_kb,
+                    'current_to_predicted_ratio': df.iloc[i]['chunk_size'] / (predicted_chunk_size_kb * 1024),
+                    'bmu': bmu
+                })
             
-            # Round to the nearest valid chunk size (multiples of 512KB)
-            min_chunk = config.get("optimizer", "min_chunk_size")
-            max_chunk = config.get("optimizer", "max_chunk_size")
-            chunk_size_kb = round (chunk_size / min_chunk) * min_chunk
+            return pd.DataFrame(predictions)
             
-            # Enforce limits
-            chunk_size_kb = round(chunk_size / (min_chunk * 10)) * min_chunk
-            
-            logger.info(f"BMU: {bmu}")
-            logger.info(f"Predicted chunk size: {chunk_size_kb} KB")
-            
-            return int(chunk_size_kb)
         except Exception as e:
-            logger.error(f"Error predicting chunk size: {e}")
-            return config.get("ml", "min_chunk_size")
+            logger.error(f"Error in prediction: {e}")
+            logger.error("Feature mismatch detected. Printing debug information:")
+            logger.error(f"Scaler expects {self.scaler.scale_.shape[0]} features")
+            logger.error(f"Feature names: {self.feature_names}")
+            return None
+    
+    def visualize_predictions(self, df_pred):
+        """
+        Visualize where the predictions fall on the SOM map.
         
+        Args:
+            df_pred (pandas.DataFrame): Dataframe with predictions from the predict method
+        """
+        try:
+            # Create directory for visualizations
+            vis_dir = os.path.join(self.models_dir, "prediction_visualizations")
+            os.makedirs(vis_dir, exist_ok=True)
             
+            map_size = self.som.get_weights().shape[0]
+            
+            # Plot the chunk size map
+            plt.figure(figsize=(12, 10))
+            plt.pcolor(self.chunk_size_map.T, cmap='viridis')
+            plt.colorbar(label='Chunk Size (KB)')
+            
+            # Add a counter for plots at each position
+            bmu_counts = {}
+            
+            # Plot each prediction as a point
+            for _, row in df_pred.iterrows():
+                bmu = row['bmu']
+                bmu_key = f"{bmu[0]},{bmu[1]}"
+                
+                # Count how many points are at this location
+                if bmu_key not in bmu_counts:
+                    bmu_counts[bmu_key] = 0
+                bmu_counts[bmu_key] += 1
+                
+                # Add jitter based on count to avoid overlap
+                count = bmu_counts[bmu_key]
+                jitter_x = 0.1 * (count % 3 - 1)  # -0.1, 0, 0.1
+                jitter_y = 0.1 * (count // 3 - 1) # Spread vertically for more points
+                
+                plt.plot(bmu[0] + 0.5 + jitter_x, bmu[1] + 0.5 + jitter_y, 'ro', 
+                        markersize=8, markeredgecolor='black')
+                
+            plt.title('Predicted Chunk Sizes on SOM Map')
+            plt.xlim(0, map_size)
+            plt.ylim(0, map_size)
+            plt.savefig(os.path.join(vis_dir, 'som_predictions.png'))
+            plt.close()
+
+            # Compare current vs predicted
+            plt.figure(figsize=(12, 6))
+            x = np.arange(len(df_pred))
+            width = 0.35
+            
+            plt.bar(x - width/2, df_pred['current_chunk_size'], width, label='Current Chunk Size (KB)')
+            plt.bar(x + width/2, df_pred['predicted_chunk_size'], width, label='Predicted Chunk Size (KB)')
+            
+            # Add file sizes as text above bars
+            for i, row in df_pred.iterrows():
+                file_size_mb = row['file_size'] / 1_000_000
+                plt.text(i, max(row['current_chunk_size'], row['predicted_chunk_size']) + 200, 
+                        f"{file_size_mb:.0f}MB", ha='center', va='bottom', rotation=90, fontsize=8)
+            
+            plt.xlabel('File')
+            plt.ylabel('Chunk Size (KB)')
+            plt.title('Current vs Predicted Chunk Sizes')
+            plt.xticks(x, [os.path.basename(path) for path in df_pred['file_path']], rotation=45, ha='right')
+            plt.legend()
+            plt.tight_layout()
+            plt.savefig(os.path.join(vis_dir, 'chunk_size_comparison.png'))
+            plt.close()
+            
+            # Plot the ratio of current to predicted chunk sizes
+            plt.figure(figsize=(12, 6))
+            colors = ['red' if ratio > 1 else 'green' for ratio in df_pred['current_to_predicted_ratio']]
+            plt.bar(x, df_pred['current_to_predicted_ratio'], color=colors)
+            plt.axhline(y=1, color='black', linestyle='--')
+            plt.xlabel('File')
+            plt.ylabel('Current / Predicted Ratio')
+            plt.title('Ratio of Current to Predicted Chunk Sizes')
+            plt.xticks(x, [os.path.basename(path) for path in df_pred['file_path']], rotation=45, ha='right')
+            
+            # Add annotations
+            for i, ratio in enumerate(df_pred['current_to_predicted_ratio']):
+                plt.text(i, ratio + 0.1, f"{ratio:.2f}x", ha='center', va='bottom')
+                
+            plt.tight_layout()
+            plt.savefig(os.path.join(vis_dir, 'chunk_size_ratio.png'))
+            plt.close()
+            
+            # Generate a distribution of predicted chunk sizes
+            plt.figure(figsize=(10, 6))
+            plt.hist(df_pred['predicted_chunk_size'], bins=10, alpha=0.7)
+            plt.xlabel('Predicted Chunk Size (KB)')
+            plt.ylabel('Number of Files')
+            plt.title('Distribution of Predicted Chunk Sizes')
+            plt.grid(alpha=0.3)
+            plt.savefig(os.path.join(vis_dir, 'predicted_size_distribution.png'))
+            plt.close()
+            
+            logger.info(f"Prediction visualizations saved to {vis_dir}")
+            
+        except Exception as e:
+            logger.error(f"Error creating prediction visualizations: {e}")
