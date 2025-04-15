@@ -52,7 +52,9 @@ def train(input_csv):
             MAX(a.read_size) as max_read_size,
             MAX(a.write_size) as max_write_size,
             COUNT(CASE WHEN a.access_type = 'read' THEN 1 END) as read_count,
-            COUNT(CASE WHEN a.access_type = 'write' THEN 1 END) as write_count
+            COUNT(CASE WHEN a.access_type = 'write' THEN 1 END) as write_count,
+            SUM(CASE WHEN a.access_type = 'read' THEN a.bytes_transferred ELSE 0 END) / 
+            NULLIF(SUM(CASE WHEN a.access_type = 'read' THEN a.elapsed_time ELSE 0 END), 0) as throughput_mbps
         FROM file_access a
         JOIN file_metadata m ON a.file_path = m.file_path
         GROUP BY a.file_path
@@ -89,31 +91,89 @@ def predict(file_size, read_size, write_size, read_count, write_count, extension
         logger.error("Failed to load SOM model")
         sys.exit(1)
     
-    # Prepare features for prediction
-    features = {
+    # Create a dummy file path based on extension
+    if extension and not extension.startswith('.'):
+        extension = '.' + extension
+    file_path = f'/dummy/path/file{extension}'
+    
+    # Create a DataFrame for a single prediction
+    df = pd.DataFrame([{
+        'file_path': file_path,
         'file_size': file_size,
+        'chunk_size': 1048576,  # Default 1MB chunk size
+        'access_count': read_count + write_count,
         'avg_read_size': read_size,
         'avg_write_size': write_size,
         'max_read_size': read_size * 2,
         'max_write_size': write_size * 2,
         'read_count': read_count,
         'write_count': write_count,
-        'access_count': read_count + write_count,
-        'read_write_ratio': read_count / (write_count + 1),
-        'dir_depth': 3  # Default value
-    }
-    
-    # Add file extension features
-    common_extensions = ['.txt', '.csv', '.log', '.dat', '.bin', '.json', '.xml', '.db']
-    for ext in common_extensions:
-        features[f'ext_{ext}'] = 1 if extension == ext else 0
-    features['ext_other'] = 1 if extension and extension not in common_extensions else 0
+        'throughput_mbps': 100.0  # Default throughput
+    }])
     
     # Predict chunk size
-    chunk_size = som.predict(features)
+    predictions = som.predict(df)
     
-    logger.info(f"Predicted chunk size: {chunk_size}KB")
-    click.echo(f"Predicted optimal chunk size: {chunk_size}KB")
+    if predictions is not None and not predictions.empty:
+        chunk_size = predictions.iloc[0]['predicted_chunk_size']
+        logger.info(f"Predicted chunk size: {chunk_size}KB")
+        click.echo(f"Predicted optimal chunk size: {chunk_size}KB")
+    else:
+        logger.error("Failed to predict chunk size")
+        click.echo("Failed to predict chunk size. See log for details.")
+        sys.exit(1)
+
+@cli.command()
+@click.option('--input-csv', '-i', required=True, help='Input CSV file with access pattern data')
+@click.option('--output-csv', '-o', help='Output CSV file to save predictions')
+def batch_predict(input_csv, output_csv):
+    """Predict chunk sizes for a batch of files from a CSV."""
+    logger = setup_logging("ml")
+    
+    if not os.path.exists(input_csv):
+        logger.error(f"Input file not found: {input_csv}")
+        sys.exit(1)
+    
+    logger.info(f"Loading data from {input_csv}")
+    df = pd.read_csv(input_csv)
+    
+    som = BeeChunkerSOM()
+    if not som.load():
+        logger.error("Failed to load SOM model")
+        sys.exit(1)
+    
+    logger.info(f"Predicting chunk sizes for {len(df)} files")
+    predictions = som.predict(df)
+    
+    if predictions is not None and not predictions.empty:
+        if output_csv:
+            predictions.to_csv(output_csv, index=False)
+            logger.info(f"Saved predictions to {output_csv}")
+            click.echo(f"Predictions saved to {output_csv}")
+        
+        # Generate visualizations
+        logger.info("Generating prediction visualizations")
+        som.visualize_predictions(predictions)
+        click.echo("Prediction visualizations created")
+        
+        # Print summary
+        current_sizes = df['chunk_size'].sum() / 1024  # KB
+        predicted_sizes = predictions['predicted_chunk_size'].sum()
+        
+        click.echo("\nStorage Impact Analysis:")
+        click.echo(f"Total current chunk size allocation: {current_sizes:.0f} KB")
+        click.echo(f"Total predicted chunk size allocation: {predicted_sizes:.0f} KB")
+        
+        if predicted_sizes < current_sizes:
+            savings = (current_sizes - predicted_sizes) / current_sizes * 100
+            click.echo(f"Potential storage reduction: {savings:.2f}%")
+        else:
+            increase = (predicted_sizes - current_sizes) / current_sizes * 100
+            click.echo(f"Storage increase for better performance: {increase:.2f}%")
+    else:
+        logger.error("Failed to predict chunk sizes")
+        click.echo("Failed to predict chunk sizes. See log for details.")
+        sys.exit(1)
 
 def main():
     """Main entry point for the CLI."""

@@ -185,44 +185,70 @@ class ChunkSizeOptimizer:
             return None
     
     def set_chunk_size(self, file_path, chunk_size_kb) -> bool:
-        """Set the chunk size of a file in BeeGFS."""
+        """Set the chunk size of a file in BeeGFS by creating a new copy with the desired chunk size."""
+        # Updated method - Since beegfs doesn't allow changing chunk size directly, we create a new file with the desired chunk size.
+        # and then replace the original file with the new one.
         try:
             # Ensure the chunk size is within the allowed range
             chunk_size_kb = max(self.min_chunk_size, min(chunk_size_kb, self.max_chunk_size))
             
-            # Convert to bytes for the command and convert to string
-            if chunk_size_kb >= 1024: # 1MB
+            # Convert to string representation for the command
+            if chunk_size_kb >= 1024:  # 1MB
                 chunk_size_str = f"{chunk_size_kb // 1024}M"
             else:
                 chunk_size_str = f"{chunk_size_kb}K"
             
-            # Use beegfs-ctl to set the chunk size
-            self.logger.info(f"Setting chunk size for {file_path} to {chunk_size_str}")
+            # Create a temporary file path
+            temp_file_path = f"{file_path}.new_chunk"
             
-            result = subprocess.run(
-                ["beegfs-ctl", "--setpattern", "--chunksize", chunk_size_str, file_path],
+            self.logger.info(f"Creating new file with chunk size {chunk_size_str} for {file_path}")
+            
+            # Set the chunk size for the new file before creating it
+            subprocess.run(
+                ["beegfs-ctl", "--setpattern", "--chunksize", chunk_size_str, "--path", temp_file_path],
+                check=True,
                 capture_output=True,
-                text=True,
-                check=True
+                text=True
             )
             
-            self.logger.debug(f"beegfs-ctl output: {result.stdout}")
+            # Copy the content from the original file to the new file
+            with open(file_path, 'rb') as src_file, open(temp_file_path, 'wb') as dst_file:
+                dst_file.write(src_file.read())
             
-            # Verify the change
-            new_chunk_size = self.get_current_chunk_size(file_path)
-            if new_chunk_size != chunk_size_kb:
-                self.logger.error(f"Failed to set chunk size for {file_path}. Expected {chunk_size_kb}KB but got {new_chunk_size}KB.")
+            # Verify file sizes match
+            original_size = os.path.getsize(file_path)
+            new_size = os.path.getsize(temp_file_path)
+            
+            if original_size != new_size:
+                self.logger.error(f"File size mismatch after copy: {original_size} != {new_size}")
+                os.remove(temp_file_path)
                 return False
             
+            # Verify the new chunk size
+            new_chunk_size = self.get_current_chunk_size(temp_file_path)
+            if new_chunk_size != chunk_size_kb:
+                self.logger.error(f"Failed to set chunk size. Expected {chunk_size_kb}KB but got {new_chunk_size}KB.")
+                os.remove(temp_file_path)
+                return False
+            
+            # Replace the original file with the new one
+            os.rename(temp_file_path, file_path)
+            
+            self.logger.info(f"Successfully set chunk size for {file_path} to {chunk_size_kb}KB")
             return True
-        
+    
         except subprocess.CalledProcessError as e:
             self.logger.error(f"Error setting chunk size for {file_path}: {e}")
+            # Clean up temporary file if it exists
+            if os.path.exists(temp_file_path):
+                os.remove(temp_file_path)
             return False
         except Exception as e:
             self.logger.error(f"Unexpected error setting chunk size for {file_path}: {e}")
+            # Clean up temporary file if it exists
+            if 'temp_file_path' in locals() and os.path.exists(temp_file_path):
+                os.remove(temp_file_path)
             return False
-    
     
     def optimize_file(self, file_path, force=False, dry_run=False):
         """Optimize the chunk size of a single file."""
