@@ -211,37 +211,49 @@ class ChunkSizeOptimizer:
         except Exception as e:
             self.logger.error(f"Unexpected error getting current chunk size for {file_path}: {e}")
             return None
-    
+        
     def set_chunk_size(self, file_path, chunk_size_kb) -> bool:
         """Set the chunk size of a file in BeeGFS by creating a new copy with the desired chunk size."""
-        # Updated method - Since beegfs doesn't allow changing chunk size directly, we create a new file with the desired chunk size.
-        # and then replace the original file with the new one.
+        temp_file_path = None
+        backup_path = None
+        
         try:
             # Ensure the chunk size is within the allowed range
             chunk_size_kb = max(self.min_chunk_size, min(chunk_size_kb, self.max_chunk_size))
             
-            # Convert to string representation for the command
-            if chunk_size_kb >= 1024:  # 1MB
-                chunk_size_str = f"{chunk_size_kb // 1024}M"
-            else:
-                chunk_size_str = f"{chunk_size_kb}K"
+            # Convert KB to bytes for the BeeGFS command
+            chunk_size_bytes = chunk_size_kb * 1024
             
             # Create a temporary file path
-            temp_file_path = f"{file_path}.new_chunk"
+            temp_file_path = f"{file_path}.tmp_{int(time.time())}"
             
-            self.logger.info(f"Creating new file with chunk size {chunk_size_str} for {file_path}")
+            self.logger.info(f"Creating new file with chunk size {chunk_size_kb}KB ({chunk_size_bytes} bytes) for {file_path}")
             
-            # Set the chunk size for the new file before creating it
-            subprocess.run(
-                ["beegfs-ctl", "--setpattern", "--chunksize", chunk_size_str, "--path", temp_file_path],
+            # Set the chunk size for the new file
+            # Use the numeric value in bytes directly with --chunksize
+            # Note: BeeGFS expects the value in bytes, not a string with unit suffix
+            command = ["beegfs-ctl", "--setpattern", f"--chunksize={chunk_size_bytes}", f"--path={temp_file_path}"]            
+            self.logger.debug(f"Running command: {' '.join(command)}")
+            
+            result = subprocess.run(
+                command,
                 check=True,
                 capture_output=True,
                 text=True
             )
             
+            # Create the empty file for the pattern to be applied
+            with open(temp_file_path, 'w') as f:
+                pass
+            
             # Copy the content from the original file to the new file
+            buffer_size = 10 * 1024 * 1024  # 10MB buffer
             with open(file_path, 'rb') as src_file, open(temp_file_path, 'wb') as dst_file:
-                dst_file.write(src_file.read())
+                while True:
+                    buffer = src_file.read(buffer_size)
+                    if not buffer:
+                        break
+                    dst_file.write(buffer)
             
             # Verify file sizes match
             original_size = os.path.getsize(file_path)
@@ -259,25 +271,58 @@ class ChunkSizeOptimizer:
                 os.remove(temp_file_path)
                 return False
             
+            # Preserve permissions from the original file
+            original_stat = os.stat(file_path)
+            os.chmod(temp_file_path, original_stat.st_mode)
+            
+            # Attempt to preserve ownership if running as root
+            try:
+                os.chown(temp_file_path, original_stat.st_uid, original_stat.st_gid)
+            except (PermissionError, OSError):
+                # Not running as root or operation not supported
+                self.logger.warning(f"Could not preserve ownership for {file_path}")
+            
             # Replace the original file with the new one
-            os.rename(temp_file_path, file_path)
+            backup_path = f"{file_path}.bak_{int(time.time())}"
+            os.rename(file_path, backup_path)
+            
+            try:
+                os.rename(temp_file_path, file_path)
+                # Success, remove backup
+                os.remove(backup_path)
+                backup_path = None  # Mark as removed so cleanup doesn't try again
+            except OSError as e:
+                # Restore from backup if rename fails
+                self.logger.error(f"Failed to rename temporary file: {e}")
+                os.rename(backup_path, file_path)
+                backup_path = None  # Mark as used so cleanup doesn't try to use it
+                return False
             
             self.logger.info(f"Successfully set chunk size for {file_path} to {chunk_size_kb}KB")
             return True
-    
+        
         except subprocess.CalledProcessError as e:
-            self.logger.error(f"Error setting chunk size for {file_path}: {e}")
-            # Clean up temporary file if it exists
-            if os.path.exists(temp_file_path):
-                os.remove(temp_file_path)
+            error_output = e.stderr if hasattr(e, 'stderr') else str(e)
+            self.logger.error(f"Error setting chunk size for {file_path}: {error_output}")
             return False
         except Exception as e:
             self.logger.error(f"Unexpected error setting chunk size for {file_path}: {e}")
-            # Clean up temporary file if it exists
-            if 'temp_file_path' in locals() and os.path.exists(temp_file_path):
-                os.remove(temp_file_path)
             return False
-    
+        finally:
+            # Clean up temporary file if it exists
+            if temp_file_path and os.path.exists(temp_file_path):
+                try:
+                    os.remove(temp_file_path)
+                except:
+                    pass
+            # Restore from backup if it exists and wasn't used
+            if backup_path and os.path.exists(backup_path):
+                try:
+                    os.rename(backup_path, file_path)
+                except:
+                    pass
+            
+            
     def optimize_file(self, file_path, force=False, dry_run=False):
         """Optimize the chunk size of a single file."""
         # Check if the file exists
