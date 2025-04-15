@@ -451,3 +451,4 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 
 - BeeGFS team for the excellent parallel filesystem
 - MiniSom library for the Self-Organizing Map implementation
+

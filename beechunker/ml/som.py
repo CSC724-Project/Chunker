@@ -335,7 +335,7 @@ class BeeChunkerSOM:
             chunk_size_kb = round (chunk_size / min_chunk) * min_chunk
             
             # Enforce limits
-            chunk_size_kb = max(min_chunk, min(chunk_size_kb, max_chunk))
+            chunk_size_kb = round(chunk_size / (min_chunk * 10)) * min_chunk
             
             logger.info(f"BMU: {bmu}")
             logger.info(f"Predicted chunk size: {chunk_size_kb} KB")
