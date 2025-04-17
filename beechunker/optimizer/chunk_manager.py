@@ -380,7 +380,7 @@ class ChunkSizeOptimizer:
             return False
     
     def optimize_directory(self, directory, recursive=False, force=False, dry_run=False, 
-                           file_types=None, min_size=None, max_size=None):
+                        file_types=None, min_size=None, max_size=None):
         """Optimize chunk sizes for all files in a directory."""
         if not os.path.isdir(directory):
             self.logger.error(f"Directory not found: {directory}")
