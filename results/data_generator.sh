@@ -193,7 +193,7 @@ generate_random_combinations() {
 echo "Starting BeeGFS expanded testing to generate 1500 data points"
 echo "Results will be saved to: ${CSV_FILE}"
 
-# Generate 1500 random combinations
+# Generate 100 random combinations - change this number to increase/decrease the number of tests
 generate_random_combinations 100
 
 echo "Testing completed. Results are available in: ${CSV_FILE}"
