@@ -2,7 +2,7 @@
 
 # BeeGFS Expanded Testing Script with Error Echos
 
-BASE_DIR="/home/jgajbha/beegfs_storage"
+BASE_DIR="/mnt/beegfs"
 LOG_DIR="${BASE_DIR}/test_logs"
 CSV_FILE="${LOG_DIR}/beegfs_test_results.csv"
 
@@ -151,7 +151,7 @@ generate_random_combinations() {
 echo "Starting BeeGFS expanded testing to generate 1500 data points"
 echo "Results will be saved to: ${CSV_FILE}"
 
-generate_random_combinations 100
+generate_random_combinations 50
 
 echo "Testing completed. Results are available in: ${CSV_FILE}"
 echo "To clean up test files, run: $(basename "$0") --cleanup"
