@@ -5,7 +5,7 @@
 # of chunk sizes, file sizes, and access patterns to generate at least 1.5k data points
 
 # Configure base directory for testing
-BASE_DIR="/mnt/beegfs"
+BASE_DIR="/home/jgajbha/beegfs_storage"
 LOG_DIR="${BASE_DIR}/test_logs"
 CSV_FILE="${LOG_DIR}/beegfs_test_results.csv"
 
@@ -194,7 +194,7 @@ echo "Starting BeeGFS expanded testing to generate 1500 data points"
 echo "Results will be saved to: ${CSV_FILE}"
 
 # Generate 1500 random combinations
-generate_random_combinations 1500
+generate_random_combinations 100
 
 echo "Testing completed. Results are available in: ${CSV_FILE}"
 echo "To clean up test files, run: $(basename "$0") --cleanup"

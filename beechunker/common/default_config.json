@@ -17,6 +17,6 @@
         "som_iterations": 5000
     },
     "beegfs": {
-        "mount_points": ["/mnt/beegfs"]
+        "mount_points": ["/home/jgajbha/beegfs_storage"]
     }
 }
