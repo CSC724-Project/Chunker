@@ -4,7 +4,7 @@ from setuptools import setup, find_packages
 setup(
     name="beechunker",
     version="0.1.0",
-    description="Intelligent chunk size optimization for BeeGFS using SOM",
+    description="Intelligent chunk size optimization for BeeGFS using Machine Learning",
     author="BeeChunker Team",
     packages=find_packages(),
     install_requires=[
@@ -19,21 +19,21 @@ setup(
         "scipy>=1.7.0",
     ],
     entry_points={
-        'console_scripts': [
-            'beechunker-monitor=beechunker.cli.monitor_cli:main',
-            'beechunker-optimizer=beechunker.cli.optimizer_cli:main',
-            'beechunker-train=beechunker.cli.trainer_cli:main',
-            'beechunker=beechunker.cli.monitor_cli:main',  # Default command
+        "console_scripts": [
+            "beechunker-monitor=beechunker.cli.monitor_cli:main",
+            "beechunker-optimizer=beechunker.cli.optimizer_cli:main",
+            "beechunker-train=beechunker.cli.trainer_cli:main",
+            "beechunker=beechunker.cli.monitor_cli:main",  # Default command
         ],
     },
-    python_requires='>=3.8',
+    python_requires=">=3.8",
     classifiers=[
-        'Development Status :: 4 - Beta',
-        'Intended Audience :: System Administrators',
-        'Topic :: System :: Filesystems',
-        'Programming Language :: Python :: 3',
-        'Programming Language :: Python :: 3.8',
-        'Programming Language :: Python :: 3.9',
-        'Programming Language :: Python :: 3.10',
+        "Development Status :: 4 - Beta",
+        "Intended Audience :: System Administrators",
+        "Topic :: System :: Filesystems",
+        "Programming Language :: Python :: 3",
+        "Programming Language :: Python :: 3.8",
+        "Programming Language :: Python :: 3.9",
+        "Programming Language :: Python :: 3.10",
     ],
 )

@@ -3,6 +3,7 @@ import re
 import sqlite3
 import subprocess
 import time
+from typing import Optional
 from beechunker.common.beechunker_logging import setup_logging
 import logging
 from beechunker.ml.som import BeeChunkerSOM
@@ -352,7 +353,7 @@ class ChunkSizeOptimizer:
                         except Exception as e:
                             self.logger.error(f"Failed to restore from backup: {e}")
 
-    def optimize_file(self, file_path, force=False, dry_run=False):
+    def optimize_file(self, file_path, force=False, dry_run=False, model_type: Optional[str] = None) -> bool:
         """Optimize the chunk size of a single file."""
         # Check if the file exists
         if not os.path.exists(file_path):
