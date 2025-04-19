@@ -7,20 +7,34 @@ from typing import Optional
 from beechunker.common.beechunker_logging import setup_logging
 import logging
 from beechunker.ml.som import BeeChunkerSOM
+from beechunker.ml.xgboost_model import BeeChunkerXGBoost
 from beechunker.common.config import config
 from beechunker.monitor.db_manager import DBManager
 
 class ChunkSizeOptimizer:
     """Manages chunk size optimization for BeeGFS files."""
-    def __init__(self):
-        """Initialize the chunk size optimizer."""
-        self.logger = logging.getLogger("beechunker.optimizer")
-        self.som = BeeChunkerSOM()
+    def __init__(self, model_type="som"):
+        """
+        Initialize the chunk size optimizer.
         
-        # Load the SOM model
-        if not self.som.load():
-            self.logger.error("Failed to load the SOM model. Make sure the model has been trained.")
-            raise RuntimeError("Failed to load the SOM model.")
+        Args:
+            model_type (str): Type of model to use ("som" or "xgboost")
+        """
+        self.logger = logging.getLogger("beechunker.optimizer")
+        self.model_type = model_type.lower()
+        
+        # Initialize the appropriate model
+        if self.model_type == "som":
+            self.model = BeeChunkerSOM()
+        elif self.model_type == "xgboost":
+            self.model = BeeChunkerXGBoost()
+        else:
+            raise ValueError(f"Unsupported model type: {model_type}")
+        
+        # Load the model
+        if not self.model.load():
+            self.logger.error(f"Failed to load the {model_type} model. Make sure the model has been trained.")
+            raise RuntimeError(f"Failed to load the {model_type} model.")
         
         self.db_path = config.get("monitor", "db_path")
         self.db_manager = DBManager(self.db_path)
@@ -29,7 +43,7 @@ class ChunkSizeOptimizer:
         self.min_chunk_size = config.get("optimizer", "min_chunk_size")
         self.max_chunk_size = config.get("optimizer", "max_chunk_size")
         
-        self.logger.info("ChunkSizeOptimizer initialized.")
+        self.logger.info(f"ChunkSizeOptimizer initialized with {model_type} model.")
         
     def get_file_features(self, file_path) -> dict: # kept the return type as dict for simplicity for now
         """Extract features from the file for chunk size optimization (prediction using the SOM model)."""
@@ -137,24 +151,24 @@ class ChunkSizeOptimizer:
             return None
     
     def predict_chunk_size(self, file_path) -> int:
-        """Predict the optimal chunk size for a file using the SOM model."""
+        """Predict the optimal chunk size for a file using the selected model."""
         try:
             # Get file features
             features = self.get_file_features(file_path)
             if features is None:
                 raise ValueError(f"Failed to extract features from {file_path}")
                 
-            # Convert dictionary to DataFrame for SOM prediction
+            # Convert dictionary to DataFrame for model prediction
             import pandas as pd
             df = pd.DataFrame([features])
             df['file_path'] = file_path
             df['chunk_size'] = self.get_current_chunk_size(file_path) * 1024  # Convert KB to bytes to match expected format
             
-            # Predict chunk size using the SOM model
-            predictions = self.som.predict(df)
+            # Predict chunk size using the selected model
+            predictions = self.model.predict(df)
             
             if predictions is None or len(predictions) == 0:
-                raise ValueError("SOM prediction failed")
+                raise ValueError(f"{self.model_type} prediction failed")
                 
             # Extract the predicted chunk size from the result
             optimal_chunk_size = int(predictions.iloc[0]['predicted_chunk_size'])

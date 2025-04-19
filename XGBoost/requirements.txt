@@ -1,0 +1,9 @@
+numpy
+pandas
+scikit-learn
+xgboost
+torch
+matplotlib
+seaborn
+python-dotenv
+tqdm

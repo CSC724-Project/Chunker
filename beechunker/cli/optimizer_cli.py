@@ -146,12 +146,14 @@ def bulk_optimize(min_size, max_size, min_access, extension, limit, dry_run):
 
 @cli.command()
 @click.argument('file_path', type=click.Path(exists=True))
-def analyze(file_path):
+@click.option('--model', type=click.Choice(['som', 'xgboost'], case_sensitive=False), default='som',
+              help='Model to use for prediction')
+def analyze(file_path, model):
     """Analyze a file and show predicted optimal chunk size without changing it."""
     logger = setup_logging("optimizer")
     
     try:
-        optimizer = ChunkSizeOptimizer()
+        optimizer = ChunkSizeOptimizer(model_type=model)
         
         # Get current chunk size
         current_size = optimizer.get_current_chunk_size(file_path)
@@ -169,7 +171,7 @@ def analyze(file_path):
         click.echo(f"File: {file_path}")
         click.echo(f"Size: {os.path.getsize(file_path) // 1024} KB")
         click.echo(f"Current chunk size: {current_size} KB")
-        click.echo(f"Optimal chunk size: {optimal_size} KB")
+        click.echo(f"Optimal chunk size ({model}): {optimal_size} KB")
         
         if current_size == optimal_size:
             click.echo("Status: Already optimal")
@@ -206,8 +208,8 @@ def analyze(file_path):
             click.echo(f"  {name}: {value_str}")
             
     except Exception as e:
-        logger.error(f"Error: {e}")
-        click.echo(f"Error: {e}")
+        logger.error(f"Error analyzing file: {e}")
+        click.echo(f"Error: {str(e)}")
         sys.exit(1)
 
 @cli.command()
@@ -313,6 +315,47 @@ def get_stats():
     except Exception as e:
         logger.error(f"Error: {e}")
         click.echo(f"Error: {e}")
+        sys.exit(1)
+
+@cli.command()
+@click.argument('directory', type=click.Path(exists=True))
+@click.option('--recursive/--no-recursive', default=False, help='Recursively process subdirectories')
+@click.option('--force/--no-force', default=False, help='Force optimization even if chunk size is already optimal')
+@click.option('--dry-run/--no-dry-run', default=False, help='Show what would be done without making changes')
+@click.option('--file-types', help='Comma-separated list of file extensions to process (e.g., .txt,.log)')
+@click.option('--min-size', type=int, help='Minimum file size in bytes to process')
+@click.option('--max-size', type=int, help='Maximum file size in bytes to process')
+@click.option('--model', type=click.Choice(['som', 'xgboost'], case_sensitive=False), default='som',
+              help='Model to use for prediction')
+def optimize(directory, recursive, force, dry_run, file_types, min_size, max_size, model):
+    """Optimize chunk sizes for files in a directory."""
+    logger = setup_logging("optimizer")
+    
+    try:
+        # Convert file types to list
+        file_types_list = None
+        if file_types:
+            file_types_list = [ft.strip() for ft in file_types.split(',')]
+        
+        optimizer = ChunkSizeOptimizer(model_type=model)
+        optimized, failed, skipped = optimizer.optimize_directory(
+            directory,
+            recursive=recursive,
+            force=force,
+            dry_run=dry_run,
+            file_types=file_types_list,
+            min_size=min_size,
+            max_size=max_size
+        )
+        
+        click.echo(f"\nOptimization complete ({model} model):")
+        click.echo(f"Successfully optimized: {optimized}")
+        click.echo(f"Failed to optimize: {failed}")
+        click.echo(f"Skipped: {skipped}")
+        
+    except Exception as e:
+        logger.error(f"Error optimizing directory: {e}")
+        click.echo(f"Error: {str(e)}")
         sys.exit(1)
 
 def main():

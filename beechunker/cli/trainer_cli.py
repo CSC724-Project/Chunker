@@ -8,11 +8,98 @@ import logging
 from beechunker.common.beechunker_logging import setup_logging
 from beechunker.common.config import config
 from beechunker.ml.som import BeeChunkerSOM
+from beechunker.ml.xgboost import BeeChunkerXGBoost
 
 @click.group()
 def cli():
     """BeeChunker SOM trainer command-line interface."""
     pass
+
+@cli.command()
+@click.option('--model', type=click.Choice(['som', 'xgboost'], case_sensitive=False), default='som',
+              help='Model to use for prediction')
+@click.option('--file-size', '-s', type=int, required=True, help='File size in bytes')
+@click.option('--read-size', '-r', type=int, default=4096, help='Average read size')
+@click.option('--write-size', '-w', type=int, default=4096, help='Average write size')
+@click.option('--read-count', '-rc', type=int, default=10, help='Estimated read operations')
+@click.option('--write-count', '-wc', type=int, default=5, help='Estimated write operations')
+@click.option('--extension', '-e', default='', help='File extension (e.g., .txt)')
+def predict(model, file_size, read_size, write_size, read_count, write_count, extension):
+    """Predict optimal chunk size for a file with given characteristics."""
+    logger = setup_logging("ml")
+    
+    if model == 'som':
+        model_instance = BeeChunkerSOM()
+    else:
+        model_instance = BeeChunkerXGBoost()
+        
+    if not model_instance.load():
+        logger.error(f"Failed to load {model} model")
+        sys.exit(1)
+    
+    # Create a dummy file path based on extension
+    if extension and not extension.startswith('.'):
+        extension = '.' + extension
+    file_path = f'/dummy/path/file{extension}'
+    
+    # Create a DataFrame for a single prediction
+    df = pd.DataFrame([{
+        'file_path': file_path,
+        'file_size': file_size,
+        'chunk_size': 1048576,  # Default 1MB chunk size
+        'access_count': read_count + write_count,
+        'avg_read_size': read_size,
+        'avg_write_size': write_size,
+        'max_read_size': read_size * 2,
+        'max_write_size': write_size * 2,
+        'read_count': read_count,
+        'write_count': write_count,
+        'throughput_mbps': 100.0  # Default throughput
+    }])
+    
+    # Predict chunk size
+    predictions = model_instance.predict(df)
+    
+    if predictions is not None and not predictions.empty:
+        chunk_size = predictions.iloc[0]['predicted_chunk_size']
+        logger.info(f"Predicted chunk size ({model}): {chunk_size}KB")
+        click.echo(f"Predicted optimal chunk size: {chunk_size}KB")
+    else:
+        logger.error("Failed to predict chunk size")
+        click.echo("Failed to predict chunk size. See log for details.")
+        sys.exit(1)
+
+@cli.command()
+@click.argument('data_path', type=click.Path(exists=True))
+@click.option('--model', type=click.Choice(['som', 'xgboost'], case_sensitive=False), default='som',
+              help='Model to train')
+def train(data_path, model):
+    """Train a model using the provided data."""
+    logger = setup_logging("ml")
+    
+    try:
+        # Load training data
+        df = pd.read_csv(data_path)
+        logger.info(f"Loaded {len(df)} records from {data_path}")
+        
+        # Initialize and train the model
+        if model == 'som':
+            model_instance = BeeChunkerSOM()
+        else:
+            model_instance = BeeChunkerXGBoost()
+            
+        if model_instance.train(df):
+            logger.info(f"Successfully trained {model} model")
+            click.echo(f"Successfully trained {model} model")
+        else:
+            logger.error(f"Failed to train {model} model")
+            click.echo(f"Failed to train {model} model. See log for details.")
+            sys.exit(1)
+            
+    except Exception as e:
+        logger.error(f"Error training model: {e}")
+        click.echo(f"Error: {str(e)}")
+        sys.exit(1)
 
 @cli.command()
 @click.option('--input-csv', '-i', help='Input CSV file with access pattern data')
@@ -73,54 +160,6 @@ def train(input_csv):
         logger.info("Training completed successfully")
     else:
         logger.error("Training failed")
-        sys.exit(1)
-
-@cli.command()
-@click.option('--file-size', '-s', type=int, required=True, help='File size in bytes')
-@click.option('--read-size', '-r', type=int, default=4096, help='Average read size')
-@click.option('--write-size', '-w', type=int, default=4096, help='Average write size')
-@click.option('--read-count', '-rc', type=int, default=10, help='Estimated read operations')
-@click.option('--write-count', '-wc', type=int, default=5, help='Estimated write operations')
-@click.option('--extension', '-e', default='', help='File extension (e.g., .txt)')
-def predict(file_size, read_size, write_size, read_count, write_count, extension):
-    """Predict optimal chunk size for a file with given characteristics."""
-    logger = setup_logging("ml")
-    
-    som = BeeChunkerSOM()
-    if not som.load():
-        logger.error("Failed to load SOM model")
-        sys.exit(1)
-    
-    # Create a dummy file path based on extension
-    if extension and not extension.startswith('.'):
-        extension = '.' + extension
-    file_path = f'/dummy/path/file{extension}'
-    
-    # Create a DataFrame for a single prediction
-    df = pd.DataFrame([{
-        'file_path': file_path,
-        'file_size': file_size,
-        'chunk_size': 1048576,  # Default 1MB chunk size
-        'access_count': read_count + write_count,
-        'avg_read_size': read_size,
-        'avg_write_size': write_size,
-        'max_read_size': read_size * 2,
-        'max_write_size': write_size * 2,
-        'read_count': read_count,
-        'write_count': write_count,
-        'throughput_mbps': 100.0  # Default throughput
-    }])
-    
-    # Predict chunk size
-    predictions = som.predict(df)
-    
-    if predictions is not None and not predictions.empty:
-        chunk_size = predictions.iloc[0]['predicted_chunk_size']
-        logger.info(f"Predicted chunk size: {chunk_size}KB")
-        click.echo(f"Predicted optimal chunk size: {chunk_size}KB")
-    else:
-        logger.error("Failed to predict chunk size")
-        click.echo("Failed to predict chunk size. See log for details.")
         sys.exit(1)
 
 @cli.command()

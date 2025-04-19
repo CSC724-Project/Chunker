@@ -6,3 +6,14 @@
 5. Inform Jayesh
 
 ## DEADLINE - 12:00PM 04/19/2024
+
+
+## 
+# Train XGBoost model
+python -m beechunker.cli.trainer_cli train --model xgboost data.csv
+
+# Analyze a file using XGBoost
+python -m beechunker.cli.optimizer_cli analyze --model xgboost file.txt
+
+# Optimize a directory using XGBoost
+python -m beechunker.cli.optimizer_cli optimize --model xgboost /path/to/dir
