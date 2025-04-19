@@ -12,16 +12,150 @@ from datetime import datetime
 logger = setup_logging("xgboost_model")
 
 class BeeChunkerXGBoost:
-    """XGBoost model for chunk size prediction."""
+    """XGBoost model for chunk size optimization."""
+    
     def __init__(self):
         """Initialize the XGBoost model."""
-        self.models_dir = config.get("ml", "models_dir")
-        self.log_path = config.get("ml", "log_path")
         self.model = None
-        self.feature_engine = XGBoostFeatureEngine()
+        self.feature_engine = None
+        self.models_dir = config.get("ml", "models_dir")
         os.makedirs(self.models_dir, exist_ok=True)
-        self.chunk_size_options = [128, 256, 512, 1024, 2048, 4096, 8192]  # KB
         
+    def _calculate_io_efficiency(self, df: pd.DataFrame) -> pd.Series:
+        """Calculate I/O efficiency metric for each row."""
+        return (df['throughput_mbps'] * 1024 * 1024) / (df['file_size'] * (df['read_count'] + df['write_count']))
+    
+    def _label_data(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Label data based on I/O efficiency and throughput using 65th percentile threshold."""
+        # Calculate I/O efficiency
+        df['io_efficiency'] = self._calculate_io_efficiency(df)
+        
+        # Get 65th percentile thresholds
+        io_threshold = df['io_efficiency'].quantile(0.65)
+        throughput_threshold = df['throughput_mbps'].quantile(0.65)
+        
+        # Label as optimal (1) if both metrics are above their thresholds
+        df['is_optimal'] = ((df['io_efficiency'] >= io_threshold) & 
+                          (df['throughput_mbps'] >= throughput_threshold)).astype(int)
+        
+        return df
+    
+    def train(self) -> bool:
+        """Train the XGBoost model on the log data."""
+        try:
+            # Load training data from logs
+            log_path = config.get("ml", "log_path")
+            if not os.path.exists(log_path):
+                logger.error(f"Training data not found at {log_path}")
+                return False
+            
+            df = pd.read_csv(log_path)
+            
+            # Clean data
+            df = df.dropna()
+            
+            # Label the data based on I/O efficiency and throughput
+            df = self._label_data(df)
+            
+            # Prepare features
+            feature_cols = [
+                'file_size', 'chunk_size', 'read_count', 'write_count',
+                'avg_read_size', 'avg_write_size', 'max_read_size', 'max_write_size',
+                'throughput_mbps', 'io_efficiency'
+            ]
+            
+            X = df[feature_cols]
+            y = df['is_optimal']
+            
+            # Train XGBoost model
+            params = {
+                'objective': 'binary:logistic',
+                'eval_metric': 'auc',
+                'max_depth': 6,
+                'eta': 0.1,
+                'subsample': 0.8,
+                'colsample_bytree': 0.8,
+                'min_child_weight': 1
+            }
+            
+            dtrain = xgb.DMatrix(X, label=y, feature_names=feature_cols)
+            self.model = xgb.train(params, dtrain, num_boost_round=100)
+            
+            # Save model
+            model_path = os.path.join(self.models_dir, "xgboost_model.joblib")
+            dump(self.model, model_path)
+            
+            logger.info("XGBoost model trained and saved successfully")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error training XGBoost model: {e}")
+            return False
+    
+    def predict(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Predict optimal chunk size probabilities for input data.
+        
+        Args:
+            df: DataFrame with features including current chunk size
+            
+        Returns:
+            DataFrame with predictions including:
+                - probability: Probability of chunk size being optimal
+                - is_optimal: Binary prediction (1 if probability >= 0.5)
+        """
+        try:
+            if self.model is None:
+                if not self.load():
+                    raise RuntimeError("Model not loaded")
+            
+            # Prepare features
+            feature_cols = [
+                'file_size', 'chunk_size', 'read_count', 'write_count',
+                'avg_read_size', 'avg_write_size', 'max_read_size', 'max_write_size',
+                'throughput_mbps'
+            ]
+            
+            # Calculate I/O efficiency
+            df['io_efficiency'] = self._calculate_io_efficiency(df)
+            feature_cols.append('io_efficiency')
+            
+            # Create DMatrix for prediction
+            dtest = xgb.DMatrix(df[feature_cols], feature_names=feature_cols)
+            
+            # Get probabilities
+            probabilities = self.model.predict(dtest)
+            
+            # Create results DataFrame
+            results = pd.DataFrame({
+                'file_path': df['file_path'],
+                'chunk_size': df['chunk_size'],
+                'probability': probabilities,
+                'is_optimal': (probabilities >= 0.5).astype(int)
+            })
+            
+            return results
+            
+        except Exception as e:
+            logger.error(f"Error making predictions: {e}")
+            return None
+    
+    def load(self) -> bool:
+        """Load the trained model from disk."""
+        try:
+            model_path = os.path.join(self.models_dir, "xgboost_model.joblib")
+            if not os.path.exists(model_path):
+                logger.error(f"Model file not found: {model_path}")
+                return False
+            
+            self.model = load(model_path)
+            logger.info("XGBoost model loaded successfully")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error loading model: {e}")
+            return False
+
     def set_last_training_time(self):
         with open(os.path.join(self.models_dir, "xgboost_last_training_time.txt"), "w") as f:
             f.write(datetime.now().strftime("%Y-%m-%d %H:%M:%S"))

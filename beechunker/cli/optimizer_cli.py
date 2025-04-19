@@ -54,21 +54,15 @@ def run(interval, min_access, dry_run):
 @click.option('--dry-run', '-d', is_flag=True, help='Do not actually change chunk sizes')
 def optimize_file(file_path, force, dry_run):
     """Optimize chunk size for a single file."""
-    logger = setup_logging("optimizer")
-    
     try:
         optimizer = ChunkSizeOptimizer()
-        
-        if optimizer.optimize_file(file_path, force=force, dry_run=dry_run):
-            click.echo(f"Successfully optimized {file_path}")
+        success = optimizer.optimize_file(file_path, force=force, dry_run=dry_run)
+        if success:
+            print(f"Successfully optimized chunk size for {file_path}")
         else:
-            click.echo(f"Failed to optimize {file_path}")
-            sys.exit(1)
-            
+            print(f"Failed to optimize chunk size for {file_path}")
     except Exception as e:
-        logger.error(f"Error: {e}")
-        click.echo(f"Error: {e}")
-        sys.exit(1)
+        print(f"Error optimizing file: {e}")
 
 @cli.command()
 @click.argument('directory', type=click.Path(exists=True, file_okay=False, dir_okay=True))
@@ -80,31 +74,17 @@ def optimize_file(file_path, force, dry_run):
 @click.option('--max-size', type=int, help='Maximum file size in bytes')
 def optimize_dir(directory, recursive, force, dry_run, file_type, min_size, max_size):
     """Optimize chunk sizes for all files in a directory."""
-    logger = setup_logging("optimizer")
-    
     try:
         optimizer = ChunkSizeOptimizer()
-        file_types = list(file_type) if file_type else None
-        
-        optimized, failed, skipped = optimizer.optimize_directory(
-            directory, 
-            recursive=recursive,
-            force=force,
-            dry_run=dry_run,
-            file_types=file_types,
-            min_size=min_size,
-            max_size=max_size
-        )
-        
-        click.echo(f"Optimization complete: {optimized} files optimized, {failed} failed, {skipped} skipped")
-        
-        if failed > 0:
-            sys.exit(1)
-            
+        success = optimizer.optimize_directory(directory, recursive=recursive, force=force,
+                                            dry_run=dry_run, file_types=file_type,
+                                            min_size=min_size, max_size=max_size)
+        if success:
+            print(f"Successfully optimized chunk sizes in {directory}")
+        else:
+            print(f"Failed to optimize chunk sizes in {directory}")
     except Exception as e:
-        logger.error(f"Error: {e}")
-        click.echo(f"Error: {e}")
-        sys.exit(1)
+        print(f"Error optimizing directory: {e}")
 
 @cli.command()
 @click.option('--min-size', type=int, help='Minimum file size in bytes')

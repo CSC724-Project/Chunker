@@ -6,35 +6,26 @@ import time
 from typing import Optional
 from beechunker.common.beechunker_logging import setup_logging
 import logging
-from beechunker.ml.som import BeeChunkerSOM
 from beechunker.ml.xgboost_model import BeeChunkerXGBoost
 from beechunker.common.config import config
 from beechunker.monitor.db_manager import DBManager
+import pandas as pd
 
 class ChunkSizeOptimizer:
     """Manages chunk size optimization for BeeGFS files."""
-    def __init__(self, model_type="som"):
-        """
-        Initialize the chunk size optimizer.
-        
-        Args:
-            model_type (str): Type of model to use ("som" or "xgboost")
-        """
+    def __init__(self):
+        """Initialize the chunk size optimizer with XGBoost model."""
         self.logger = logging.getLogger("beechunker.optimizer")
-        self.model_type = model_type.lower()
         
-        # Initialize the appropriate model
-        if self.model_type == "som":
-            self.model = BeeChunkerSOM()
-        elif self.model_type == "xgboost":
+        # Initialize XGBoost model
+        try:
             self.model = BeeChunkerXGBoost()
-        else:
-            raise ValueError(f"Unsupported model type: {model_type}")
-        
-        # Load the model
-        if not self.model.load():
-            self.logger.error(f"Failed to load the {model_type} model. Make sure the model has been trained.")
-            raise RuntimeError(f"Failed to load the {model_type} model.")
+            if not self.model.load():
+                self.logger.error("Failed to load the XGBoost model. Make sure the model has been trained.")
+                raise RuntimeError("Failed to load the XGBoost model.")
+        except Exception as e:
+            self.logger.error(f"Error initializing XGBoost model: {e}")
+            raise
         
         self.db_path = config.get("monitor", "db_path")
         self.db_manager = DBManager(self.db_path)
@@ -43,7 +34,10 @@ class ChunkSizeOptimizer:
         self.min_chunk_size = config.get("optimizer", "min_chunk_size")
         self.max_chunk_size = config.get("optimizer", "max_chunk_size")
         
-        self.logger.info(f"ChunkSizeOptimizer initialized with {model_type} model.")
+        # Define chunk size options to test (in KB)
+        self.chunk_size_options = [128, 256, 512, 1024, 2048, 4096, 8192]
+        
+        self.logger.info("ChunkSizeOptimizer initialized with XGBoost model.")
         
     def get_file_features(self, file_path) -> dict: # kept the return type as dict for simplicity for now
         """Extract features from the file for chunk size optimization (prediction using the SOM model)."""
@@ -151,34 +145,56 @@ class ChunkSizeOptimizer:
             return None
     
     def predict_chunk_size(self, file_path) -> int:
-        """Predict the optimal chunk size for a file using the selected model."""
+        """Predict the optimal chunk size for a file using XGBoost binary classification."""
         try:
             # Get file features
             features = self.get_file_features(file_path)
             if features is None:
                 raise ValueError(f"Failed to extract features from {file_path}")
-                
-            # Convert dictionary to DataFrame for model prediction
-            import pandas as pd
-            df = pd.DataFrame([features])
-            df['file_path'] = file_path
-            df['chunk_size'] = self.get_current_chunk_size(file_path) * 1024  # Convert KB to bytes to match expected format
             
-            # Predict chunk size using the selected model
-            predictions = self.model.predict(df)
+            # Get current chunk size
+            current_chunk_size = self.get_current_chunk_size(file_path)
+            if current_chunk_size is None:
+                raise ValueError(f"Could not determine current chunk size for {file_path}")
+            
+            # Test each chunk size option
+            best_chunk_size = None
+            highest_probability = -1
+            
+            # Create a list of test dataframes for each chunk size
+            test_dfs = []
+            for chunk_size_kb in self.chunk_size_options:
+                df = pd.DataFrame([features])
+                df['file_path'] = file_path
+                df['chunk_size'] = chunk_size_kb * 1024  # Convert KB to bytes
+                test_dfs.append(df)
+            
+            # Combine all test cases into one DataFrame
+            test_df = pd.concat(test_dfs, ignore_index=True)
+            
+            # Get predictions for all chunk sizes at once
+            predictions = self.model.predict(test_df)
             
             if predictions is None or len(predictions) == 0:
-                raise ValueError(f"{self.model_type} prediction failed")
-                
-            # Extract the predicted chunk size from the result
-            optimal_chunk_size = int(predictions.iloc[0]['predicted_chunk_size'])
+                raise ValueError("XGBoost prediction failed")
             
-            # Log the predicted chunk size
-            self.logger.info(f"Predicted chunk size for {file_path}: {optimal_chunk_size}KB")
+            # Find the chunk size with highest probability of being optimal
+            for i, chunk_size_kb in enumerate(self.chunk_size_options):
+                probability = predictions.iloc[i]['probability']  # Assuming model returns probability
+                if probability > highest_probability:
+                    highest_probability = probability
+                    best_chunk_size = chunk_size_kb
+            
+            if best_chunk_size is None:
+                raise ValueError("Could not determine optimal chunk size")
+            
+            # Log the prediction results
+            self.logger.info(f"Predicted optimal chunk size for {file_path}: {best_chunk_size}KB")
+            self.logger.info(f"Prediction probability: {highest_probability:.2f}")
             self.logger.info(f"Features used for prediction: {features}")
             
-            return optimal_chunk_size
-                
+            return best_chunk_size
+            
         except Exception as e:
             self.logger.error(f"Error predicting chunk size for {file_path}: {e}")
             raise
@@ -367,80 +383,47 @@ class ChunkSizeOptimizer:
                         except Exception as e:
                             self.logger.error(f"Failed to restore from backup: {e}")
 
-    def optimize_file(self, file_path, force=False, dry_run=False, model_type: Optional[str] = None) -> bool:
-        """Optimize the chunk size of a single file."""
-        # Check if the file exists
-        if not os.path.exists(file_path):
-            self.logger.error(f"File {file_path} does not exist.")
-            return False
-        
+    def optimize_file(self, file_path, force=False, dry_run=False) -> bool:
+        """Optimize chunk size for a file using XGBoost model."""
         try:
-            # Get the current chunk size
+            if not os.path.exists(file_path):
+                self.logger.error(f"File not found: {file_path}")
+                return False
+                
             current_chunk_size = self.get_current_chunk_size(file_path)
             if current_chunk_size is None:
-                self.logger.error(f"Could not determine current chunk size for {file_path}.")
+                self.logger.error(f"Could not determine current chunk size for {file_path}")
                 return False
-            
-            # Predict the optimal chunk size
-            optimal_chunk_size = self.predict_chunk_size(file_path)
-            
-            # Check if optimization is needed
-            if current_chunk_size == optimal_chunk_size and not force:
-                self.logger.info(f"Chunk size for {file_path} is already optimal ({current_chunk_size}KB). No changes made.")
-                return True
-            
-            self.logger.info(f"Optimizing {file_path}: {current_chunk_size}KB -> {optimal_chunk_size}KB")
-            
-            # Apply the optimization if it is not a dry run
-            if not dry_run:
-                success = self.set_chunk_size(file_path, optimal_chunk_size)
-                if success:
-                    self.logger.info(f"Successfully optimized chunk size for {file_path} to {optimal_chunk_size}KB.")
                 
-                    # Record the change in the database
-                    try:
-                        conn = sqlite3.connect(self.db_path)
-                        cursor = conn.cursor()
-                        cursor.execute ("""
-                            INSERT INTO optimization_history 
-                            (file_path, old_chunk_size, new_chunk_size, optimization_time)
-                            VALUES (?, ?, ?, ?)
-                        """, (file_path, current_chunk_size, optimal_chunk_size, time.time()))
-                        conn.commit()
-                        conn.close()
-                    except sqlite3.OperationalError as e:
-                        # Table doesn't exist yet, create it
-                        conn = sqlite3.connect(self.db_path)
-                        cursor = conn.cursor()
-                        cursor.execute("""
-                            CREATE TABLE IF NOT EXISTS optimization_history (
-                                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                                file_path TEXT NOT NULL,
-                                old_chunk_size INTEGER NOT NULL,
-                                new_chunk_size INTEGER NOT NULL,
-                                optimization_time REAL NOT NULL
-                            )
-                        """)
-                        cursor.execute("""
-                            INSERT INTO optimization_history 
-                            (file_path, old_chunk_size, new_chunk_size, optimization_time)
-                            VALUES (?, ?, ?, ?)
-                        """, (file_path, current_chunk_size, optimal_chunk_size, time.time()))
-                        conn.commit()
-                        conn.close()
-                    except Exception as e:
-                        self.logger.error(f"Error recording optimization: {e}")
-                    
-                    return True
-                else:
-                    self.logger.error(f"Failed to optimize chunk size for {file_path}.")
-                    return False
-            else:
-                self.logger.info(f"Dry run: Optimization for {file_path} would change chunk size from {current_chunk_size}KB to {optimal_chunk_size}KB.")
+            # Skip if file is too small
+            file_size = os.path.getsize(file_path)
+            if file_size < current_chunk_size * 1024:  # Convert chunk size to bytes
+                self.logger.info(f"File {file_path} is too small for chunk size optimization")
+                return False
+                
+            # Predict optimal chunk size
+            optimal_chunk_size = self.predict_chunk_size(file_path)
+            if optimal_chunk_size is None:
+                self.logger.error(f"Failed to predict optimal chunk size for {file_path}")
+                return False
+                
+            # Check if optimization is needed
+            if not force and abs(optimal_chunk_size - current_chunk_size) / current_chunk_size < 0.1:
+                self.logger.info(f"Current chunk size ({current_chunk_size}KB) is already near optimal for {file_path}")
                 return True
+                
+            self.logger.info(f"Optimizing {file_path}: Current chunk size: {current_chunk_size}KB, "
+                           f"Optimal chunk size: {optimal_chunk_size}KB")
+                           
+            if dry_run:
+                self.logger.info("Dry run - no changes made")
+                return True
+                
+            # Set the new chunk size
+            return self.set_chunk_size(file_path, optimal_chunk_size)
             
         except Exception as e:
-            self.logger.error(f"Error optimizing chunk size for {file_path}: {e}")
+            self.logger.error(f"Error optimizing file {file_path}: {e}")
             return False
     
     def optimize_directory(self, directory, recursive=False, force=False, dry_run=False, 
