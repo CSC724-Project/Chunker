@@ -274,6 +274,6 @@ class BeeChunkerRF:
                 'file_size_KB': row['file_size_KB'],
                 'current_chunk_KB': row['chunk_size_KB'],
                 'optimal_chunk_KB': opt,
-                'probability': prob
+                'confidance': prob
             })
         return pd.DataFrame(records)
