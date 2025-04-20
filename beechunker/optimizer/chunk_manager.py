@@ -7,7 +7,7 @@ from typing import Optional
 from beechunker.common.beechunker_logging import setup_logging
 import logging
 from beechunker.ml.som import BeeChunkerSOM
-from beechunker.ml.random_forest import BeeChunkerRandomForest
+from beechunker.ml.random_forest import BeeChunkerRF
 from beechunker.common.config import config
 from beechunker.monitor.db_manager import DBManager
 
@@ -17,7 +17,7 @@ class ChunkSizeOptimizer:
         """Initialize the chunk size optimizer."""
         self.logger = logging.getLogger("beechunker.optimizer")
         self.som = BeeChunkerSOM()
-        self.rf = BeeChunkerRandomForest()
+        self.rf = BeeChunkerRF()
         
         # Load the SOM model
         if not self.som.load():
@@ -143,6 +143,7 @@ class ChunkSizeOptimizer:
         try:
             # Get file features
             features = self.get_file_features(file_path)
+            print(f"features : {features}")
             if features is None:
                 raise ValueError(f"Failed to extract features from {file_path}")
                 
@@ -157,6 +158,8 @@ class ChunkSizeOptimizer:
                     # Predict chunk size using the SOM model
                     predictions = self.som.predict(df)
                 case "rf":
+                    # Rename 'file_size' to 'file_size_KB' for compatibility with the RF model
+                    df.rename(columns={'file_size': 'file_size_KB'}, inplace=True)
                     # Predict chunk size using the Random Forest model
                     predictions = self.rf.predict(df)
                 case "xgb":
@@ -171,7 +174,7 @@ class ChunkSizeOptimizer:
             if model_type == "som":
                 optimal_chunk_size = int(predictions.iloc[0]['predicted_chunk_size'])
             if model_type == "rf":
-                optimal_chunk_size = int(predictions.iloc[0]['optimal_chunk_KB']) 
+                optimal_chunk_size = int(predictions.iloc[0]['optimal_chunk_KB'])
             
             # Log the predicted chunk size
             self.logger.info(f"Predicted chunk size for {file_path}: {optimal_chunk_size}KB")

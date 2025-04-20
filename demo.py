@@ -9,6 +9,7 @@ import statistics
 from typing import List, Dict, Optional, Tuple
 import pandas as pd
 from pathlib import Path
+import logging
 
 from beechunker.common.config import config
 from beechunker.monitor.db_manager import DBManager
@@ -18,9 +19,24 @@ from beechunker.optimizer.chunk_manager import ChunkSizeOptimizer
 
 
 class BeeChunkerDemo:
-    def __init__(self):
-        """Initialize all the services"""
-        print("Initializing BeeChunker Demo...")
+    def __init__(self, model_type: str = "rf"):
+        """Initialize all the services
+        
+        Args:
+            model_type (str): The model type to use for optimization ("rf", "som", or "xgb")
+        """
+        print(f"Initializing BeeChunker Demo with {model_type} model...")
+        
+        # Suppress all logs
+        logging.getLogger().setLevel(logging.CRITICAL)
+        
+        # Disable beechunker logging
+        for logger_name in logging.Logger.manager.loggerDict:
+            if logger_name.startswith('beechunker'):
+                logging.getLogger(logger_name).setLevel(logging.CRITICAL)
+        
+        # Store model type
+        self.model_type = model_type
 
         # Initialize database
         self.db_path = config.get("monitor", "db_path")
@@ -55,7 +71,7 @@ class BeeChunkerDemo:
         # Initialize the optimizer
         try:
             self.optimizer = ChunkSizeOptimizer()
-            print("BeeChunker optimizer initialized.")
+            print(f"BeeChunker optimizer initialized with {model_type} model.")
         except Exception as e:
             print(f"Error initializing optimizer: {e}")
             sys.exit(1)
@@ -90,23 +106,18 @@ class BeeChunkerDemo:
         try:
             if os.path.exists(file_path):
                 os.remove(file_path)
-                print(f"File {file_path} removed successfully.")
                 return True
             else:
-                print(f"File {file_path} does not exist.")
                 return False
         except PermissionError:
             # If we can't remove it with normal permissions, use sudo
             try:
                 rm_cmd = ["sudo", "rm", "-f", file_path]
                 subprocess.run(rm_cmd, check=True, capture_output=True, text=True)
-                print(f"Removed file using sudo")
                 return True
-            except subprocess.SubprocessError as e:
-                print(f"Error removing file with sudo: {e}")
+            except subprocess.SubprocessError:
                 return False
-        except Exception as e:
-            print(f"Error removing file: {e}")
+        except Exception:
             return False
     
     def create_file(self, file_path: str, file_size: int) -> bool:
@@ -135,10 +146,8 @@ class BeeChunkerDemo:
                     remaining -= current_chunk
                     
             actual_size = os.path.getsize(file_path)
-            print(f"File {file_path} created with size {actual_size} bytes.")
             return True
-        except Exception as e:
-            print(f"Error creating file: {e}")
+        except Exception:
             return False
     
     def measure_file_performance(self, file_path: str, iterations: int = 3) -> Dict:
@@ -152,7 +161,6 @@ class BeeChunkerDemo:
             Dict: Dictionary with read/write speeds and throughput
         """
         if not os.path.exists(file_path):
-            print(f"File {file_path} does not exist. Cannot measure performance.")
             return None
             
         file_size = os.path.getsize(file_path)
@@ -200,7 +208,7 @@ class BeeChunkerDemo:
         }
     
     def optimize_file(self, file_path: str) -> bool:
-        """Optimize chunk size for a file
+        """Optimize chunk size for a file using specified model type
 
         Args:
             file_path (str): Path to the file
@@ -208,8 +216,8 @@ class BeeChunkerDemo:
         Returns:
             bool: True if optimization was successful, False otherwise
         """
-        print(f"Optimizing chunk size for {file_path}...")
-        return self.optimizer.optimize_file(file_path, force=True, dry_run=False)
+        print(f"Optimizing chunk size for {file_path} using {self.model_type} model...")
+        return self.optimizer.optimize_file(file_path, force=True, dry_run=False, model_type=self.model_type)
     
     def compare_performance(self, before: Dict, after: Dict) -> Dict:
         """Compare performance before and after optimization
@@ -336,7 +344,7 @@ class BeeChunkerDemo:
     
     def run_demo(self):
         """Run the full demonstration with different file sizes"""
-        print("\n====== BeeChunker Optimization Demo ======")
+        print(f"\n====== BeeChunker Optimization Demo ({self.model_type.upper()} Model) ======")
         
         # Define file sizes for testing
         file_sizes = {
@@ -405,8 +413,17 @@ class BeeChunkerDemo:
 
 
 if __name__ == "__main__":
+    # Parse command line arguments for model type
+    import argparse
+    
+    parser = argparse.ArgumentParser(description='BeeChunker Demo Script')
+    parser.add_argument('--model', type=str, choices=['rf', 'som', 'xgb'], default='rf',
+                        help='Model type to use for optimization (default: rf)')
+    
+    args = parser.parse_args()
+    
     try:
-        demo = BeeChunkerDemo()
+        demo = BeeChunkerDemo(model_type=args.model)
         demo.run_demo()
     except KeyboardInterrupt:
         print("\nDemo interrupted by user.")
