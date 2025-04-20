@@ -212,30 +212,86 @@ class BeeChunkerXGBoost:
             return False
     
     def predict(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Predict optimal chunk size probabilities for input data."""
+        """
+        Predict optimal chunk sizes for the given dataframe.
+        For each file, it will:
+        1. Test the current chunk size
+        2. If not optimal, test a range of chunk sizes to find the best one
+        3. Return the optimal chunk size and related metrics
+        """
         try:
             if self.model is None:
                 if not self.load():
                     raise RuntimeError("Model not loaded")
             
-            # Prepare features
-            X, _ = self._prepare_features(df)
+            # Define chunk size options (in KB)
+            chunk_size_options = [128, 256, 512, 1024, 2048, 4096, 8192]
+            results = []
             
-            # Create DMatrix for prediction
-            dtest = xgb.DMatrix(X, feature_names=self.feature_names)
+            # Process each file
+            for idx, row in df.iterrows():
+                current_chunk_kb = row['chunk_size'] // 1024
+                file_features = row.copy()
+                
+                # First, evaluate current chunk size
+                X_current, _ = self._prepare_features(pd.DataFrame([file_features]))
+                dtest_current = xgb.DMatrix(X_current, feature_names=self.feature_names)
+                current_prob = self.model.predict(dtest_current)[0]
+                
+                if current_prob >= 0.5:
+                    # Current chunk size is predicted to be optimal
+                    optimal_chunk_size = current_chunk_kb
+                    optimal_prob = current_prob
+                else:
+                    # Test different chunk sizes
+                    test_chunks = []
+                    for chunk_size in chunk_size_options:
+                        test_row = file_features.copy()
+                        test_row['chunk_size'] = chunk_size * 1024  # Convert KB to bytes
+                        test_chunks.append(test_row)
+                    
+                    # Prepare features for all test chunks
+                    test_df = pd.DataFrame(test_chunks)
+                    X_test, _ = self._prepare_features(test_df)
+                    dtest = xgb.DMatrix(X_test, feature_names=self.feature_names)
+                    
+                    # Get probabilities for each chunk size
+                    chunk_probs = self.model.predict(dtest)
+                    
+                    # Find the chunk size with highest probability
+                    best_idx = np.argmax(chunk_probs)
+                    optimal_chunk_size = chunk_size_options[best_idx]
+                    optimal_prob = chunk_probs[best_idx]
+                
+                # Store results
+                results.append({
+                    'file_path': row['file_path'],
+                    'file_size': row['file_size'],
+                    'current_chunk_size': current_chunk_kb,
+                    'current_probability': current_prob,
+                    'predicted_chunk_size': optimal_chunk_size,
+                    'predicted_probability': optimal_prob,
+                    'is_current_optimal': current_prob >= 0.5,
+                    'needs_optimization': current_chunk_kb != optimal_chunk_size,
+                    'optimization_gain': optimal_prob - current_prob if current_chunk_kb != optimal_chunk_size else 0
+                })
+                
+                logger.debug(f"File: {row['file_path']}, "
+                           f"Current: {current_chunk_kb}KB (prob: {current_prob:.3f}), "
+                           f"Optimal: {optimal_chunk_size}KB (prob: {optimal_prob:.3f})")
             
-            # Get probabilities
-            probabilities = self.model.predict(dtest)
+            results_df = pd.DataFrame(results)
             
-            # Create results DataFrame
-            results = pd.DataFrame({
-                'file_path': df['file_path'],
-                'chunk_size': df['chunk_size'],
-                'probability': probabilities,
-                'is_optimal': (probabilities >= 0.5).astype(int)
-            })
+            # Log summary statistics
+            needs_opt = results_df['needs_optimization'].sum()
+            total = len(results_df)
+            avg_gain = results_df[results_df['needs_optimization']]['optimization_gain'].mean()
             
-            return results
+            logger.info(f"Prediction complete: {needs_opt}/{total} files need optimization")
+            if needs_opt > 0:
+                logger.info(f"Average predicted optimization gain: {avg_gain:.3f}")
+            
+            return results_df
             
         except Exception as e:
             logger.error(f"Error making predictions: {e}")
