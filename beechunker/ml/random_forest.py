@@ -20,10 +20,23 @@ class BeeChunkerRF:
     and subsequent optimal chunk size selection.
     """
     def __init__(self):
-        """Initialize the ensemble model and paths."""
+        """Initialize the ensemble model and paths, with a writable fallback."""
         self.model = None
-        self.models_dir = config.get("ml", "models_dir")
-        os.makedirs(self.models_dir, exist_ok=True)
+        self.feature_names = None
+        cfg_dir = config.get("ml", "models_dir")
+        # Try the configured path first
+        try:
+            os.makedirs(cfg_dir, exist_ok=True)
+            self.models_dir = cfg_dir
+        except PermissionError:
+            # Fallback to a local 'models' directory under cwd
+            fallback = os.path.join(os.getcwd(), "models")
+            os.makedirs(fallback, exist_ok=True)
+            self.models_dir = fallback
+            logger.warning(
+                "Cannot write to configured models_dir '%s'. "
+                "Falling back to '%s'.", cfg_dir, fallback
+            )
 
     def set_last_training_time(self):
         path = os.path.join(self.models_dir, "last_training_time.txt")
@@ -94,6 +107,9 @@ class BeeChunkerRF:
         X = num.drop(columns=["OT", "throughput_KBps"])  # all numeric except labels
         y = num["OT"]
 
+        # save feature list
+        self.feature_names = X.columns.tolist()
+
         # train/test split
         test_size = config.get("ml", "test_size")
         X_train, X_test, y_train, y_test = train_test_split(
@@ -140,15 +156,42 @@ class BeeChunkerRF:
         )
         logger.info("Confusion Matrix:\n%s", confusion_matrix(y_test, preds))
 
-        # persist
-        mpath = os.path.join(self.models_dir, "rf_model.joblib")
-        joblib.dump(self.model, mpath)
+        # # persist
+        # mpath = os.path.join(self.models_dir, "rf_model.joblib")
+        # joblib.dump(self.model, mpath)
+        # self.set_last_training_time()
+        # logger.info(f"Stacked model saved to {mpath}")
+
+        # persist full ensemble
+        ensemble_path = os.path.join(self.models_dir, "rf_model.joblib")
+        joblib.dump(self.model, ensemble_path)
+        logger.info(f"Stacked model saved to {ensemble_path}")
+
+        # persist base learners
+        rf_path  = os.path.join(self.models_dir, "rf_base.joblib")
+        hgb_path = os.path.join(self.models_dir, "hgb_base.joblib")
+        joblib.dump(rf,  rf_path)
+        joblib.dump(hgb, hgb_path)
+        logger.info(f"RF base learner saved to {rf_path}")
+        logger.info(f"HGB base learner saved to {hgb_path}")
+
+        # persist meta‑learner
+        meta_path = os.path.join(self.models_dir, "logistic_meta.joblib")
+        joblib.dump(self.model.final_estimator_, meta_path)
+        logger.info(f"Logistic meta‑learner saved to {meta_path}")
+
+        # persist feature names
+        joblib.dump(self.feature_names, os.path.join(self.models_dir, "feature_names.joblib"))
+
+        # record training time
         self.set_last_training_time()
-        logger.info(f"Stacked model saved to {mpath}")
 
         # cleanup
-        if os.path.exists(tmp_out): os.remove(tmp_out)
+        if os.path.exists(tmp_out):
+            os.remove(tmp_out)
+
         return True
+        
 
     def load(self) -> bool:
         """
@@ -161,21 +204,36 @@ class BeeChunkerRF:
         try:
             self.model = joblib.load(path)
             logger.info("Model loaded from %s", path)
+            self.feature_names = joblib.load(os.path.join(self.models_dir, "feature_names.joblib"))
             return True
         except Exception as e:
             logger.error(f"Error loading model: {e}")
             return False
 
+    # @staticmethod
+    # def find_optimal_chunk_size(model, row, candidate_chunks, tolerance=1e-4):
+    #     """
+    #     For each candidate chunk size, compute P(OT=1) and choose the size
+    #     with the highest probability (breaking ties by larger chunk).
+    #     """
+    #     probs = []
+    #     for c in candidate_chunks:
+    #         feat = [row['file_size_KB'], c, row['access_count'], row['access_count_label']]
+    #         probs.append(model.predict_proba([feat])[0, 1])
+    #     arr = np.array(probs)
+    #     idxs = np.where(np.abs(arr - arr.max()) < tolerance)[0]
+    #     return int(candidate_chunks[idxs].max()), float(arr.max())
+
     @staticmethod
-    def find_optimal_chunk_size(model, row, candidate_chunks, tolerance=1e-4):
-        """
-        For each candidate chunk size, compute P(OT=1) and choose the size
-        with the highest probability (breaking ties by larger chunk).
-        """
+    def find_optimal_chunk_size(model, row, feature_names, candidate_chunks, tolerance=1e-4):
         probs = []
         for c in candidate_chunks:
-            feat = [row['file_size_KB'], c, row['access_count'], row['access_count_label']]
-            probs.append(model.predict_proba([feat])[0, 1])
+            # make a copy of the full row
+            rc = row.copy()
+            rc['chunk_size_KB'] = c
+            # select exactly the columns the model was trained on, in the same order
+            x = rc[feature_names].values.reshape(1, -1)
+            probs.append(model.predict_proba(x)[0,1])
         arr = np.array(probs)
         idxs = np.where(np.abs(arr - arr.max()) < tolerance)[0]
         return int(candidate_chunks[idxs].max()), float(arr.max())
@@ -210,12 +268,12 @@ class BeeChunkerRF:
         cand = np.sort(df['chunk_size_KB'].unique())
         records = []
         for _, row in df.iterrows():
-            opt, prob = self.find_optimal_chunk_size(self.model, row, cand)
+            opt, prob = self.find_optimal_chunk_size(self.model, row, self.feature_names, cand)
             records.append({
                 'file_path': row.get('file_path', ''),
                 'file_size_KB': row['file_size_KB'],
                 'current_chunk_KB': row['chunk_size_KB'],
                 'optimal_chunk_KB': opt,
-                'probability': prob
+                'confidance': prob
             })
         return pd.DataFrame(records)
