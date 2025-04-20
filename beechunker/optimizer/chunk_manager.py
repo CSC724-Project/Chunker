@@ -7,6 +7,7 @@ from typing import Optional
 from beechunker.common.beechunker_logging import setup_logging
 import logging
 from beechunker.ml.som import BeeChunkerSOM
+from beechunker.ml.random_forest import BeeChunkerRandomForest
 from beechunker.common.config import config
 from beechunker.monitor.db_manager import DBManager
 
@@ -16,6 +17,7 @@ class ChunkSizeOptimizer:
         """Initialize the chunk size optimizer."""
         self.logger = logging.getLogger("beechunker.optimizer")
         self.som = BeeChunkerSOM()
+        self.rf = BeeChunkerRandomForest()
         
         # Load the SOM model
         if not self.som.load():
@@ -136,8 +138,8 @@ class ChunkSizeOptimizer:
             self.logger.error(f"Error extracting features from {file_path}: {e}")
             return None
     
-    def predict_chunk_size(self, file_path) -> int:
-        """Predict the optimal chunk size for a file using the SOM model."""
+    def predict_chunk_size(self, file_path, model_type: Optional[str]="rf") -> int:
+        """Predict the optimal chunk size for a file using the the mentioned ML model."""
         try:
             # Get file features
             features = self.get_file_features(file_path)
@@ -148,16 +150,28 @@ class ChunkSizeOptimizer:
             import pandas as pd
             df = pd.DataFrame([features])
             df['file_path'] = file_path
-            df['chunk_size'] = self.get_current_chunk_size(file_path) * 1024  # Convert KB to bytes to match expected format
             
-            # Predict chunk size using the SOM model
-            predictions = self.som.predict(df)
+            match model_type:
+                case "som":
+                    df['chunk_size'] = self.get_current_chunk_size(file_path) * 1024  # Convert KB to bytes to match expected format
+                    # Predict chunk size using the SOM model
+                    predictions = self.som.predict(df)
+                case "rf":
+                    # Predict chunk size using the Random Forest model
+                    predictions = self.rf.predict(df)
+                case "xgb":
+                    # Predict chunk size using the XGBoost model
+                    # predictions = self.xgb.predict(df) # TODO: Implement XGBoost model
+                    raise NotImplementedError("XGBoost model is not implemented yet.")
             
             if predictions is None or len(predictions) == 0:
-                raise ValueError("SOM prediction failed")
+                raise ValueError(f"{model_type} prediction failed")
                 
             # Extract the predicted chunk size from the result
-            optimal_chunk_size = int(predictions.iloc[0]['predicted_chunk_size'])
+            if model_type == "som":
+                optimal_chunk_size = int(predictions.iloc[0]['predicted_chunk_size'])
+            if model_type == "rf":
+                optimal_chunk_size = int(predictions.iloc[0]['optimal_chunk_KB']) 
             
             # Log the predicted chunk size
             self.logger.info(f"Predicted chunk size for {file_path}: {optimal_chunk_size}KB")
@@ -353,7 +367,7 @@ class ChunkSizeOptimizer:
                         except Exception as e:
                             self.logger.error(f"Failed to restore from backup: {e}")
 
-    def optimize_file(self, file_path, force=False, dry_run=False, model_type: Optional[str] = None) -> bool:
+    def optimize_file(self, file_path, force=False, dry_run=False, model_type: Optional[str] = "rf") -> bool:
         """Optimize the chunk size of a single file."""
         # Check if the file exists
         if not os.path.exists(file_path):
@@ -368,7 +382,7 @@ class ChunkSizeOptimizer:
                 return False
             
             # Predict the optimal chunk size
-            optimal_chunk_size = self.predict_chunk_size(file_path)
+            optimal_chunk_size = self.predict_chunk_size(file_path, model_type=model_type)
             
             # Check if optimization is needed
             if current_chunk_size == optimal_chunk_size and not force:
@@ -483,7 +497,7 @@ class ChunkSizeOptimizer:
         self.logger.info(f"Directory {directory}: {optimized_count} optimized, {failed_count} failed, {skipped_count} skipped")
         return optimized_count, failed_count, skipped_count
     
-    def bulk_optimize(self, query_params=None, dry_run=False, limit=None):
+    def bulk_optimize(self, query_params=None, dry_run=False, limit=None, model_type: Optional[str] = "rf"):
         """Optimize chunk sizes for files based on database query."""
         try:
             conn = sqlite3.connect(self.db_path)
@@ -538,7 +552,7 @@ class ChunkSizeOptimizer:
             
             for file_path in files:
                 if os.path.exists(file_path):
-                    if self.optimize_file(file_path, dry_run=dry_run):
+                    if self.optimize_file(file_path, dry_run=dry_run, model_type=model_type):
                         optimized_count += 1
                     else:
                         failed_count += 1
