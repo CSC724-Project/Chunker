@@ -27,35 +27,76 @@ class BeeChunkerXGBoost:
         """Calculate I/O efficiency metric for each row."""
         return (df['throughput_mbps'] * 1024 * 1024) / (df['file_size'] * (df['read_count'] + df['write_count']))
     
-    def _prepare_features(self, df: pd.DataFrame) -> tuple:
-        """Prepare features for training or prediction."""
-        # Calculate I/O efficiency
-        df['io_efficiency'] = self._calculate_io_efficiency(df)
-        
-        # Select base features
-        feature_cols = [
-            'file_size', 'chunk_size', 'read_count', 'write_count',
-            'avg_read_size', 'avg_write_size', 'max_read_size', 'max_write_size',
-            'throughput_mbps', 'io_efficiency'
-        ]
-        
-        # Add time-based features if available
-        if 'timestamp' in df.columns:
-            df['hour'] = pd.to_datetime(df['timestamp']).dt.hour
-            df['day_of_week'] = pd.to_datetime(df['timestamp']).dt.dayofweek
-            feature_cols.extend(['hour', 'day_of_week'])
-        
-        X = df[feature_cols]
-        
-        # Scale features
-        X_scaled = self.scaler.fit_transform(X) if self.scaler is None else self.scaler.transform(X)
-        
-        return X_scaled, feature_cols
+    def _prepare_features(self, df: pd.DataFrame, training: bool = False) -> tuple:
+        """
+        Prepare features for training or prediction.
+        Args:
+            df: DataFrame with raw features
+            training: Whether this is for training (True) or prediction (False)
+        Returns:
+            tuple: (scaled_features, feature_names)
+        """
+        try:
+            # Calculate I/O efficiency
+            df['io_efficiency'] = self._calculate_io_efficiency(df)
+            
+            # Base features that are always required
+            base_features = [
+                'file_size', 'chunk_size', 'read_count', 'write_count',
+                'avg_read_size', 'avg_write_size', 'max_read_size', 'max_write_size',
+                'throughput_mbps', 'io_efficiency'
+            ]
+            
+            # Add time-based features if we're training or if they were used in training
+            if training:
+                self.use_time_features = 'timestamp' in df.columns
+                if self.use_time_features:
+                    df['hour'] = pd.to_datetime(df['timestamp']).dt.hour
+                    df['day_of_week'] = pd.to_datetime(df['timestamp']).dt.dayofweek
+                    base_features.extend(['hour', 'day_of_week'])
+            else:
+                # For prediction, check if we used time features during training
+                if hasattr(self, 'use_time_features') and self.use_time_features:
+                    if 'timestamp' not in df.columns:
+                        # If time features were used in training but not available for prediction,
+                        # add default values
+                        df['hour'] = 12  # Middle of the day
+                        df['day_of_week'] = 3  # Middle of the week
+                    else:
+                        df['hour'] = pd.to_datetime(df['timestamp']).dt.hour
+                        df['day_of_week'] = pd.to_datetime(df['timestamp']).dt.dayofweek
+                    base_features.extend(['hour', 'day_of_week'])
+            
+            # Extract features
+            X = df[base_features].copy()
+            
+            # Handle any missing values with median
+            X = X.fillna(X.median())
+            
+            # Scale features
+            if training:
+                # Fit and transform for training data
+                X_scaled = self.scaler.fit_transform(X)
+            else:
+                # Only transform for prediction data
+                if not hasattr(self.scaler, 'mean_'):
+                    raise RuntimeError("Scaler is not fitted. Need to train the model first.")
+                X_scaled = self.scaler.transform(X)
+            
+            return X_scaled, base_features
+            
+        except Exception as e:
+            logger.error(f"Error preparing features: {e}")
+            logger.error(f"Available columns: {df.columns.tolist()}")
+            raise
     
-    def _label_data(self, df: pd.DataFrame) -> pd.DataFrame:
+    def _label_data(self, df: pd.DataFrame) -> tuple:
         """
         Label data based on I/O efficiency and throughput using 65th percentile threshold.
         This is specific to BeeGFS logs where we need to determine optimal chunk sizes.
+        
+        Returns:
+            tuple: (labeled_dataframe, thresholds_dict)
         """
         try:
             # Calculate I/O efficiency
@@ -75,7 +116,13 @@ class BeeChunkerXGBoost:
             logger.info(f"Data labeling complete: {optimal_count}/{total_count} "
                       f"({optimal_count/total_count*100:.2f}%) samples labeled as optimal")
             
-            return df
+            # Return both the labeled dataframe and the thresholds
+            thresholds = {
+                'io_efficiency': float(io_threshold),
+                'throughput': float(throughput_threshold)
+            }
+            
+            return df, thresholds
             
         except Exception as e:
             logger.error(f"Error in data labeling: {e}")
@@ -92,9 +139,16 @@ class BeeChunkerXGBoost:
             
             # Load and clean data
             df = pd.read_csv(log_path)
-            if len(df) < config.get("ml", "min_training_samples", 100):
-                logger.warning(f"Not enough samples for training. Need at least "
-                            f"{config.get('ml', 'min_training_samples', 100)} samples.")
+            
+            # Get minimum training samples from config, default to 100 if not set
+            try:
+                min_samples = config.get("ml", "min_training_samples")
+            except:
+                min_samples = 100
+                logger.info(f"Using default minimum training samples: {min_samples}")
+            
+            if len(df) < min_samples:
+                logger.warning(f"Not enough samples for training. Need at least {min_samples} samples.")
                 return False
             
             # Clean data
@@ -103,13 +157,13 @@ class BeeChunkerXGBoost:
             
             # Label the data based on I/O efficiency and throughput
             try:
-                df = self._label_data(df)
+                df, thresholds = self._label_data(df)
             except Exception as e:
                 logger.error(f"Failed to label data: {e}")
                 return False
             
             # Prepare features
-            X, feature_names = self._prepare_features(df)
+            X, feature_names = self._prepare_features(df, training=True)
             y = df['is_optimal']
             
             # Initialize K-fold
@@ -191,10 +245,7 @@ class BeeChunkerXGBoost:
                 },
                 'parameters': params,
                 'features': feature_names,
-                'labeling_thresholds': {
-                    'io_efficiency': float(io_threshold),
-                    'throughput': float(throughput_threshold)
-                }
+                'labeling_thresholds': thresholds
             }
             
             with open(os.path.join(self.models_dir, "xgboost_model_info.json"), "w") as f:
@@ -234,7 +285,7 @@ class BeeChunkerXGBoost:
                 file_features = row.copy()
                 
                 # First, evaluate current chunk size
-                X_current, _ = self._prepare_features(pd.DataFrame([file_features]))
+                X_current, _ = self._prepare_features(pd.DataFrame([file_features]), training=False)
                 dtest_current = xgb.DMatrix(X_current, feature_names=self.feature_names)
                 current_prob = self.model.predict(dtest_current)[0]
                 
@@ -252,7 +303,7 @@ class BeeChunkerXGBoost:
                     
                     # Prepare features for all test chunks
                     test_df = pd.DataFrame(test_chunks)
-                    X_test, _ = self._prepare_features(test_df)
+                    X_test, _ = self._prepare_features(test_df, training=False)
                     dtest = xgb.DMatrix(X_test, feature_names=self.feature_names)
                     
                     # Get probabilities for each chunk size
