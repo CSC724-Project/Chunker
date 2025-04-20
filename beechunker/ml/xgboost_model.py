@@ -4,10 +4,11 @@ import numpy as np
 import pandas as pd
 import xgboost as xgb
 from joblib import dump, load
-from beechunker.common.config import config
-from beechunker.ml.xgboost_feature_engine import XGBoostFeatureEngine
-from beechunker.common.beechunker_logging import setup_logging
 from datetime import datetime
+from sklearn.model_selection import KFold
+from sklearn.preprocessing import StandardScaler
+from beechunker.common.config import config
+from beechunker.common.beechunker_logging import setup_logging
 
 logger = setup_logging("xgboost_model")
 
@@ -17,7 +18,8 @@ class BeeChunkerXGBoost:
     def __init__(self):
         """Initialize the XGBoost model."""
         self.model = None
-        self.feature_engine = None
+        self.scaler = StandardScaler()
+        self.feature_names = None
         self.models_dir = config.get("ml", "models_dir")
         os.makedirs(self.models_dir, exist_ok=True)
         
@@ -25,23 +27,62 @@ class BeeChunkerXGBoost:
         """Calculate I/O efficiency metric for each row."""
         return (df['throughput_mbps'] * 1024 * 1024) / (df['file_size'] * (df['read_count'] + df['write_count']))
     
-    def _label_data(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Label data based on I/O efficiency and throughput using 65th percentile threshold."""
+    def _prepare_features(self, df: pd.DataFrame) -> tuple:
+        """Prepare features for training or prediction."""
         # Calculate I/O efficiency
         df['io_efficiency'] = self._calculate_io_efficiency(df)
         
-        # Get 65th percentile thresholds
-        io_threshold = df['io_efficiency'].quantile(0.65)
-        throughput_threshold = df['throughput_mbps'].quantile(0.65)
+        # Select base features
+        feature_cols = [
+            'file_size', 'chunk_size', 'read_count', 'write_count',
+            'avg_read_size', 'avg_write_size', 'max_read_size', 'max_write_size',
+            'throughput_mbps', 'io_efficiency'
+        ]
         
-        # Label as optimal (1) if both metrics are above their thresholds
-        df['is_optimal'] = ((df['io_efficiency'] >= io_threshold) & 
-                          (df['throughput_mbps'] >= throughput_threshold)).astype(int)
+        # Add time-based features if available
+        if 'timestamp' in df.columns:
+            df['hour'] = pd.to_datetime(df['timestamp']).dt.hour
+            df['day_of_week'] = pd.to_datetime(df['timestamp']).dt.dayofweek
+            feature_cols.extend(['hour', 'day_of_week'])
         
-        return df
+        X = df[feature_cols]
+        
+        # Scale features
+        X_scaled = self.scaler.fit_transform(X) if self.scaler is None else self.scaler.transform(X)
+        
+        return X_scaled, feature_cols
+    
+    def _label_data(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Label data based on I/O efficiency and throughput using 65th percentile threshold.
+        This is specific to BeeGFS logs where we need to determine optimal chunk sizes.
+        """
+        try:
+            # Calculate I/O efficiency
+            df['io_efficiency'] = self._calculate_io_efficiency(df)
+            
+            # Get 65th percentile thresholds (based on empirical analysis)
+            io_threshold = df['io_efficiency'].quantile(0.65)
+            throughput_threshold = df['throughput_mbps'].quantile(0.65)
+            
+            # Label as optimal (1) if both metrics are above their thresholds
+            df['is_optimal'] = ((df['io_efficiency'] >= io_threshold) & 
+                              (df['throughput_mbps'] >= throughput_threshold)).astype(int)
+            
+            # Log labeling statistics
+            optimal_count = df['is_optimal'].sum()
+            total_count = len(df)
+            logger.info(f"Data labeling complete: {optimal_count}/{total_count} "
+                      f"({optimal_count/total_count*100:.2f}%) samples labeled as optimal")
+            
+            return df
+            
+        except Exception as e:
+            logger.error(f"Error in data labeling: {e}")
+            raise
     
     def train(self) -> bool:
-        """Train the XGBoost model on the log data."""
+        """Train the XGBoost model on the log data using k-fold cross validation."""
         try:
             # Load training data from logs
             log_path = config.get("ml", "log_path")
@@ -49,28 +90,42 @@ class BeeChunkerXGBoost:
                 logger.error(f"Training data not found at {log_path}")
                 return False
             
+            # Load and clean data
             df = pd.read_csv(log_path)
+            if len(df) < config.get("ml", "min_training_samples", 100):
+                logger.warning(f"Not enough samples for training. Need at least "
+                            f"{config.get('ml', 'min_training_samples', 100)} samples.")
+                return False
             
             # Clean data
-            df = df.dropna()
+            df = df.dropna(subset=['file_size', 'chunk_size', 'read_count', 'write_count', 
+                                 'throughput_mbps'])
             
             # Label the data based on I/O efficiency and throughput
-            df = self._label_data(df)
+            try:
+                df = self._label_data(df)
+            except Exception as e:
+                logger.error(f"Failed to label data: {e}")
+                return False
             
             # Prepare features
-            feature_cols = [
-                'file_size', 'chunk_size', 'read_count', 'write_count',
-                'avg_read_size', 'avg_write_size', 'max_read_size', 'max_write_size',
-                'throughput_mbps', 'io_efficiency'
-            ]
-            
-            X = df[feature_cols]
+            X, feature_names = self._prepare_features(df)
             y = df['is_optimal']
             
-            # Train XGBoost model
+            # Initialize K-fold
+            n_splits = 5
+            kf = KFold(n_splits=n_splits, shuffle=True, random_state=42)
+            
+            # Initialize metrics storage
+            metrics = {
+                'logloss': [], 'accuracy': [], 'precision': [],
+                'recall': [], 'f1': [], 'auc': []
+            }
+            
+            # XGBoost parameters
             params = {
                 'objective': 'binary:logistic',
-                'eval_metric': 'auc',
+                'eval_metric': ['logloss', 'error', 'auc'],
                 'max_depth': 6,
                 'eta': 0.1,
                 'subsample': 0.8,
@@ -78,12 +133,76 @@ class BeeChunkerXGBoost:
                 'min_child_weight': 1
             }
             
-            dtrain = xgb.DMatrix(X, label=y, feature_names=feature_cols)
-            self.model = xgb.train(params, dtrain, num_boost_round=100)
+            # Perform k-fold training
+            best_model = None
+            best_score = float('inf')
             
-            # Save model
-            model_path = os.path.join(self.models_dir, "xgboost_model.joblib")
-            dump(self.model, model_path)
+            for fold, (train_idx, val_idx) in enumerate(kf.split(X), 1):
+                X_train, X_val = X[train_idx], X[val_idx]
+                y_train, y_val = y[train_idx], y[val_idx]
+                
+                dtrain = xgb.DMatrix(X_train, label=y_train, feature_names=feature_names)
+                dval = xgb.DMatrix(X_val, label=y_val, feature_names=feature_names)
+                
+                # Train model
+                model = xgb.train(
+                    params,
+                    dtrain,
+                    num_boost_round=100,
+                    evals=[(dval, 'val')],
+                    early_stopping_rounds=10,
+                    verbose_eval=False
+                )
+                
+                # Evaluate model
+                val_preds = model.predict(dval)
+                fold_metrics = self._calculate_metrics(y_val, val_preds)
+                
+                # Store metrics
+                for metric, value in fold_metrics.items():
+                    metrics[metric].append(value)
+                
+                # Update best model
+                if fold_metrics['logloss'] < best_score:
+                    best_score = fold_metrics['logloss']
+                    best_model = model
+                
+                logger.info(f"Fold {fold} - Logloss: {fold_metrics['logloss']:.4f}, "
+                          f"AUC: {fold_metrics['auc']:.4f}")
+            
+            # Save best model and components
+            self.model = best_model
+            self.feature_names = feature_names
+            
+            model_path = os.path.join(self.models_dir, "xgboost_model.json")
+            scaler_path = os.path.join(self.models_dir, "xgboost_scaler.joblib")
+            
+            self.model.save_model(model_path)
+            dump(self.scaler, scaler_path)
+            
+            # Save model info
+            model_info = {
+                'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                'metrics': {
+                    name: {
+                        'mean': float(np.mean(values)),
+                        'std': float(np.std(values))
+                    } for name, values in metrics.items()
+                },
+                'parameters': params,
+                'features': feature_names,
+                'labeling_thresholds': {
+                    'io_efficiency': float(io_threshold),
+                    'throughput': float(throughput_threshold)
+                }
+            }
+            
+            with open(os.path.join(self.models_dir, "xgboost_model_info.json"), "w") as f:
+                import json
+                json.dump(model_info, f, indent=4)
+            
+            # Set last training time
+            self.set_last_training_time()
             
             logger.info("XGBoost model trained and saved successfully")
             return True
@@ -93,35 +212,17 @@ class BeeChunkerXGBoost:
             return False
     
     def predict(self, df: pd.DataFrame) -> pd.DataFrame:
-        """
-        Predict optimal chunk size probabilities for input data.
-        
-        Args:
-            df: DataFrame with features including current chunk size
-            
-        Returns:
-            DataFrame with predictions including:
-                - probability: Probability of chunk size being optimal
-                - is_optimal: Binary prediction (1 if probability >= 0.5)
-        """
+        """Predict optimal chunk size probabilities for input data."""
         try:
             if self.model is None:
                 if not self.load():
                     raise RuntimeError("Model not loaded")
             
             # Prepare features
-            feature_cols = [
-                'file_size', 'chunk_size', 'read_count', 'write_count',
-                'avg_read_size', 'avg_write_size', 'max_read_size', 'max_write_size',
-                'throughput_mbps'
-            ]
-            
-            # Calculate I/O efficiency
-            df['io_efficiency'] = self._calculate_io_efficiency(df)
-            feature_cols.append('io_efficiency')
+            X, _ = self._prepare_features(df)
             
             # Create DMatrix for prediction
-            dtest = xgb.DMatrix(df[feature_cols], feature_names=feature_cols)
+            dtest = xgb.DMatrix(X, feature_names=self.feature_names)
             
             # Get probabilities
             probabilities = self.model.predict(dtest)
@@ -141,26 +242,55 @@ class BeeChunkerXGBoost:
             return None
     
     def load(self) -> bool:
-        """Load the trained model from disk."""
+        """Load the trained model and components."""
         try:
-            model_path = os.path.join(self.models_dir, "xgboost_model.joblib")
-            if not os.path.exists(model_path):
-                logger.error(f"Model file not found: {model_path}")
+            model_path = os.path.join(self.models_dir, "xgboost_model.json")
+            scaler_path = os.path.join(self.models_dir, "xgboost_scaler.joblib")
+            
+            if not all(os.path.exists(p) for p in [model_path, scaler_path]):
+                logger.error("Model files not found")
                 return False
             
-            self.model = load(model_path)
+            self.model = xgb.Booster()
+            self.model.load_model(model_path)
+            self.scaler = load(scaler_path)
+            
+            # Load feature names from model info
+            try:
+                with open(os.path.join(self.models_dir, "xgboost_model_info.json"), "r") as f:
+                    model_info = json.load(f)
+                    self.feature_names = model_info['features']
+            except:
+                logger.warning("Could not load feature names from model info")
+            
             logger.info("XGBoost model loaded successfully")
             return True
             
         except Exception as e:
             logger.error(f"Error loading model: {e}")
             return False
-
+    
+    def _calculate_metrics(self, y_true, y_pred) -> dict:
+        """Calculate various metrics for model evaluation."""
+        from sklearn.metrics import log_loss, accuracy_score, precision_score
+        from sklearn.metrics import recall_score, f1_score, roc_auc_score
+        
+        return {
+            'logloss': log_loss(y_true, y_pred),
+            'accuracy': accuracy_score(y_true, y_pred.round()),
+            'precision': precision_score(y_true, y_pred.round()),
+            'recall': recall_score(y_true, y_pred.round()),
+            'f1': f1_score(y_true, y_pred.round()),
+            'auc': roc_auc_score(y_true, y_pred)
+        }
+    
     def set_last_training_time(self):
+        """Set the last training time."""
         with open(os.path.join(self.models_dir, "xgboost_last_training_time.txt"), "w") as f:
             f.write(datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
     
     def get_last_training_time(self):
+        """Get the last training time."""
         try:
             with open(os.path.join(self.models_dir, "xgboost_last_training_time.txt"), "r") as f:
                 last_training_time = f.read().strip()
@@ -180,175 +310,4 @@ class BeeChunkerXGBoost:
             return new_data_count
         except Exception as e:
             logger.error(f"Error getting new data count: {e}")
-            return 0
-
-    def _calculate_io_efficiency(self, df):
-        """Calculate I/O efficiency score based on file size and I/O operations."""
-        df['io_efficiency'] = (df['throughput_mbps'] * 1024 * 1024) / (df['file_size'] * (df['read_count'] + df['write_count']))
-        return df
-
-    def _label_data(self, df):
-        """Label data based on I/O efficiency and throughput."""
-        # Calculate I/O efficiency
-        df = self._calculate_io_efficiency(df)
-        
-        # Get 65th percentile of I/O efficiency
-        efficiency_threshold = df['io_efficiency'].quantile(0.65)
-        
-        # Label data points
-        df['is_optimal'] = ((df['io_efficiency'] >= efficiency_threshold) & 
-                          (df['throughput_mbps'] >= df['throughput_mbps'].quantile(0.65))).astype(int)
-        
-        return df
-
-    def train(self) -> bool:
-        """Train the XGBoost model using log data."""
-        logger.info("Starting XGBoost training")
-        
-        try:
-            # Load data from logs
-            if not os.path.exists(self.log_path):
-                logger.error(f"Log file not found: {self.log_path}")
-                return False
-                
-            df = pd.read_csv(self.log_path)
-            if len(df) < config.get("ml", "min_training_samples"):
-                logger.warning(f"Not enough samples for training. Need at least {config.get('ml', 'min_training_samples')} samples.")
-                return False
-            
-            # Clean and preprocess data
-            df_clean = self.feature_engine.clean(self.log_path)
-            if df_clean is None:
-                logger.error("Failed to clean and preprocess data")
-                return False
-            
-            # Label the data
-            df_labeled = self._label_data(df_clean)
-            
-            # Prepare features for training
-            X, feature_names = self.feature_engine.prepare_features(df_labeled, training=True)
-            if X is None or feature_names is None:
-                logger.error("Failed to prepare features")
-                return False
-                
-            y = df_labeled['is_optimal']
-            
-            # Train XGBoost model
-            dtrain = xgb.DMatrix(X, label=y, feature_names=feature_names)
-            
-            params = {
-                'objective': 'binary:logistic',
-                'eval_metric': 'auc',
-                'max_depth': 6,
-                'eta': 0.1,
-                'subsample': 0.8,
-                'colsample_bytree': 0.8,
-                'min_child_weight': 1
-            }
-            
-            self.model = xgb.train(params, dtrain, num_boost_round=100)
-            
-            # Save model and components
-            dump(self.model, os.path.join(self.models_dir, "xgboost_model.joblib"))
-            dump(self.feature_engine, os.path.join(self.models_dir, "xgboost_feature_engine.joblib"))
-            
-            # Set last training time
-            self.set_last_training_time()
-            
-            logger.info("XGBoost model training completed successfully")
-            return True
-            
-        except Exception as e:
-            logger.error(f"Error during XGBoost training: {e}")
-            return False
-
-    def load(self) -> bool:
-        """Load the trained XGBoost model and components."""
-        try:
-            model_path = os.path.join(self.models_dir, "xgboost_model.joblib")
-            feature_engine_path = os.path.join(self.models_dir, "xgboost_feature_engine.joblib")
-            
-            if not all(os.path.exists(p) for p in [model_path, feature_engine_path]):
-                logger.warning("XGBoost model files not found")
-                return False
-            
-            self.model = load(model_path)
-            self.feature_engine = load(feature_engine_path)
-            
-            logger.info("Successfully loaded XGBoost model")
-            return True
-            
-        except Exception as e:
-            logger.error(f"Error loading XGBoost model: {e}")
-            return False
-
-    def predict(self, df) -> pd.DataFrame:
-        """Predict optimal chunk sizes for the given dataframe."""
-        if self.model is None:
-            if not self.load():
-                logger.error("XGBoost model not loaded. Cannot predict.")
-                return None
-        
-        try:
-            # Clean and preprocess the input data
-            df_clean = self.feature_engine._calculate_derived_features(df)
-            
-            # Prepare features for prediction
-            X, _ = self.feature_engine.prepare_features(df_clean)
-            if X is None:
-                logger.error("Failed to prepare features for prediction")
-                return None
-            
-            # Create DMatrix for prediction
-            dmatrix = xgb.DMatrix(X)
-            
-            # Get probability of current chunk size being optimal
-            is_optimal_prob = self.model.predict(dmatrix)
-            
-            # Initialize results list
-            results = []
-            
-            # For each file, find the optimal chunk size
-            for i, row in df_clean.iterrows():
-                current_chunk_kb = row['chunk_size'] // 1024
-                
-                if is_optimal_prob[i] >= 0.5:
-                    # Current chunk size is predicted to be optimal
-                    optimal_chunk_size = current_chunk_kb
-                else:
-                    # Try different chunk sizes and find the best one
-                    test_chunks = pd.DataFrame([row] * len(self.chunk_size_options))
-                    for j, chunk_size in enumerate(self.chunk_size_options):
-                        test_chunks.iloc[j, test_chunks.columns.get_loc('chunk_size')] = chunk_size * 1024
-                    
-                    # Calculate derived features for test chunks
-                    test_chunks = self.feature_engine._calculate_derived_features(test_chunks)
-                    
-                    # Prepare features for test chunks
-                    X_test, _ = self.feature_engine.prepare_features(test_chunks)
-                    if X_test is None:
-                        logger.error("Failed to prepare features for chunk size options")
-                        continue
-                        
-                    dtest = xgb.DMatrix(X_test)
-                    
-                    # Get probabilities for each chunk size
-                    chunk_probs = self.model.predict(dtest)
-                    
-                    # Select the chunk size with highest probability of being optimal
-                    optimal_idx = np.argmax(chunk_probs)
-                    optimal_chunk_size = self.chunk_size_options[optimal_idx]
-                
-                results.append({
-                    'file_path': row['file_path'],
-                    'file_size': row['file_size'],
-                    'current_chunk_size': current_chunk_kb,
-                    'predicted_chunk_size': optimal_chunk_size,
-                    'current_to_predicted_ratio': current_chunk_kb / optimal_chunk_size if optimal_chunk_size > 0 else float('inf')
-                })
-            
-            return pd.DataFrame(results)
-            
-        except Exception as e:
-            logger.error(f"Error making XGBoost predictions: {e}")
-            return None 
+            return 0 
