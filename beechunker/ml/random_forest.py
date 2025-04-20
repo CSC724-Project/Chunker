@@ -66,8 +66,9 @@ class BeeChunkerRF:
             return False
 
         # OT label processing
+        tmp_in = None
         try:
-            ot_quantile = config.get("ml", "ot_quantile", fallback=0.65)
+            ot_quantile = config.get("ml", "ot_quantile")
             tmp_in = os.path.join(self.models_dir, "_tmp_raw.csv")
             df_raw.to_csv(tmp_in, index=False)
             tmp_out = os.path.join(self.models_dir, "_tmp_proc.csv")
@@ -94,22 +95,23 @@ class BeeChunkerRF:
         y = num["OT"]
 
         # train/test split
-        test_size = config.get("ml", "test_size", fallback=0.2)
+        test_size = config.get("ml", "test_size")
         X_train, X_test, y_train, y_test = train_test_split(
             X, y, test_size=test_size, stratify=y, random_state=42
         )
 
         # base learners
-        n_est = config.get("ml", "n_estimators", fallback=100)
+        n_est = config.get("ml", "n_estimators")
         rf = RandomForestClassifier(
             n_estimators=n_est,
             max_features='sqrt',
             class_weight='balanced',
             random_state=42,
-            n_jobs=-1
+            n_jobs=-1,
+            
         )
         hgb = HistGradientBoostingClassifier(
-            max_iter=config.get("ml", "hgb_iter", fallback=20),
+            max_iter=config.get("ml", "hgb_iter"),
             random_state=42
         )
 
@@ -189,10 +191,15 @@ class BeeChunkerRF:
 
         # preprocess OT labels
         tmp = os.path.join(self.models_dir, "temp_pred.csv")
+        
         df_raw.to_csv(tmp, index=False)
-        proc = OptimalThroughputProcessor(tmp, tmp, quantile=config.get("ml", "ot_quantile", fallback=0.65))
+        print("1")
+        proc = OptimalThroughputProcessor(tmp, tmp, quantile=config.get("ml", "ot_quantile"))
+        print("2")
         proc.run()
+        print("3")
         df = pd.read_csv(tmp)
+        print(df.shape[1])
 
         # cleanup
         os.remove(tmp)
