@@ -128,28 +128,54 @@ class BeeChunkerXGBoost:
             logger.error(f"Error in data labeling: {e}")
             raise
     
-    def train(self) -> bool:
-        """Train the XGBoost model on the log data using k-fold cross validation."""
+    def train(self, input_data) -> bool:
+        """Train the XGBoost model on the log data using k-fold cross validation.
+        
+        Args:
+            input_data: Either a file path (str) or a DataFrame with features and chunk sizes.
+        Returns:
+            bool: True if training was successful, False otherwise.
+        """
         try:
-            # Load training data from logs
-            log_path = config.get("ml", "log_path")
-            if not os.path.exists(log_path):
-                logger.error(f"Training data not found at {log_path}")
-                return False
+            logger.info("Starting XGBoost training")
+            
+            # If input_data is a DataFrame, check the sample count
+            if isinstance(input_data, pd.DataFrame):
+                df = input_data
+                if len(df) < config.get("ml", "min_training_samples"):
+                    logger.warning("Not enough samples for training. Need at least %d samples.", 
+                                config.get("ml", "min_training_samples"))
+                    return False
+                
+                # Save the DataFrame to a temporary file for processing
+                temp_csv_path = os.path.join(self.models_dir, "temp_training_data.csv")
+                df.to_csv(temp_csv_path, index=False)
+                logger.info(f"Saved input DataFrame to temporary file: {temp_csv_path}")
+                
+                # Use the file path for further processing
+                log_path = temp_csv_path
+            else:
+                # Assume input_data is a file path
+                log_path = input_data
+                
+                # Check if the file exists
+                if not os.path.exists(log_path):
+                    logger.error(f"Input file not found: {log_path}")
+                    return False
+                
+                # Check the sample count from the file
+                try:
+                    df_check = pd.read_csv(log_path)
+                    if len(df_check) < config.get("ml", "min_training_samples"):
+                        logger.warning("Not enough samples for training. Need at least %d samples.", 
+                                    config.get("ml", "min_training_samples"))
+                        return False
+                except Exception as e:
+                    logger.error(f"Error checking input file: {e}")
+                    return False
             
             # Load and clean data
             df = pd.read_csv(log_path)
-            
-            # Get minimum training samples from config, default to 100 if not set
-            try:
-                min_samples = config.get("ml", "min_training_samples")
-            except:
-                min_samples = 100
-                logger.info(f"Using default minimum training samples: {min_samples}")
-            
-            if len(df) < min_samples:
-                logger.warning(f"Not enough samples for training. Need at least {min_samples} samples.")
-                return False
             
             # Clean data
             df = df.dropna(subset=['file_size', 'chunk_size', 'read_count', 'write_count', 
@@ -255,11 +281,22 @@ class BeeChunkerXGBoost:
             # Set last training time
             self.set_last_training_time()
             
+            # Clean up temporary file if it was created
+            if isinstance(input_data, pd.DataFrame) and os.path.exists(temp_csv_path):
+                os.remove(temp_csv_path)
+                logger.info(f"Removed temporary file: {temp_csv_path}")
+            
             logger.info("XGBoost model trained and saved successfully")
             return True
             
         except Exception as e:
             logger.error(f"Error training XGBoost model: {e}")
+            # Clean up temporary file if there was an error
+            if isinstance(input_data, pd.DataFrame):
+                temp_csv_path = os.path.join(self.models_dir, "temp_training_data.csv")
+                if os.path.exists(temp_csv_path):
+                    os.remove(temp_csv_path)
+                    logger.info(f"Removed temporary file: {temp_csv_path}")
             return False
     
     def predict(self, df: pd.DataFrame) -> pd.DataFrame:
