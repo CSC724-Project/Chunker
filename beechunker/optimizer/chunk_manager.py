@@ -8,6 +8,7 @@ from beechunker.common.beechunker_logging import setup_logging
 import logging
 from beechunker.ml.som import BeeChunkerSOM
 from beechunker.ml.random_forest import BeeChunkerRF
+from beechunker.ml.xgboost_model import BeeChunkerXGBoost
 from beechunker.common.config import config
 from beechunker.monitor.db_manager import DBManager
 
@@ -18,6 +19,7 @@ class ChunkSizeOptimizer:
         self.logger = logging.getLogger("beechunker.optimizer")
         self.som = BeeChunkerSOM()
         self.rf = BeeChunkerRF()
+        self.xgb = BeeChunkerXGBoost()
         
         # Load the SOM model
         if not self.som.load():
@@ -136,6 +138,22 @@ class ChunkSizeOptimizer:
             self.logger.error(f"Error extracting features from {file_path}: {e}")
             return None
     
+    def convert_features_to_xgboost_format(self, features: dict) -> dict:
+        """Convert features from file system format to XGBoost format."""
+        # XGBoost expects features in bytes and with different names
+        xgboost_features = {
+            'file_size': features['file_size_KB'] * 1024,  # Convert KB to bytes
+            'avg_read_size': features['avg_read_KB'] * 1024,  # Convert KB to bytes
+            'avg_write_size': features['avg_write_KB'] * 1024,  # Convert KB to bytes
+            'max_read_size': features['max_read_KB'] * 1024,  # Convert KB to bytes
+            'max_write_size': features['max_write_KB'] * 1024,  # Convert KB to bytes
+            'read_count': features['read_ops'],  # Rename
+            'write_count': features['write_ops'],  # Rename
+            'throughput_mbps': features['throughput_mbps']  # Already in correct format/name
+        }
+        # chunk size will be added in the predict chunk size function
+        return xgboost_features
+    
     def predict_chunk_size(self, file_path, model_type: Optional[str]="rf") -> int:
         """Predict the optimal chunk size for a file using the the mentioned ML model."""
         try:
@@ -165,7 +183,22 @@ class ChunkSizeOptimizer:
                     df['chunk_size_KB'] = current_chunk_size
                     predictions = self.rf.predict(df)
                 case "xgb":
-                    raise NotImplementedError("XGBoost model is not implemented yet.")
+                    xgb_features = self.convert_features_to_xgboost_format(features)
+                    xgb_features['chunk_size'] = current_chunk_size * 1024  # Add chunk size in bytes
+                    xgb_df = pd.DataFrame([xgb_features])
+                    print(f"xgb_df : {xgb_df}")
+                    # XGBoost directly returns the predicted chunk size
+                    optimal_chunk_size = self.xgb.predict(xgb_df)
+                    # For XGBoost, we directly have the optimal chunk size
+                    if optimal_chunk_size is None:
+                        raise ValueError("XGBoost prediction failed")
+                    
+                    # Return immediately since XGBoost directly returns the optimal size
+                    self.logger.info(f"Predicted chunk size for {file_path}: {optimal_chunk_size}KB")
+                    self.logger.info(f"Features used for prediction: {features}")
+                    
+                    return optimal_chunk_size
+                    
             
             if predictions is None or len(predictions) == 0:
                 raise ValueError(f"{model_type} prediction failed")
