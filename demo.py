@@ -9,6 +9,8 @@ import statistics
 from typing import List, Dict, Optional, Tuple
 import pandas as pd
 from pathlib import Path
+import logging
+import sqlite3
 
 from beechunker.common.config import config
 from beechunker.monitor.db_manager import DBManager
@@ -18,9 +20,24 @@ from beechunker.optimizer.chunk_manager import ChunkSizeOptimizer
 
 
 class BeeChunkerDemo:
-    def __init__(self):
-        """Initialize all the services"""
-        print("Initializing BeeChunker Demo...")
+    def __init__(self, model_type: str = "rf"):
+        """Initialize all the services
+        
+        Args:
+            model_type (str): The model type to use for optimization ("rf", "som", or "xgb")
+        """
+        print(f"Initializing BeeChunker Demo with {model_type} model...")
+        
+        # Suppress all logs
+        logging.getLogger().setLevel(logging.CRITICAL)
+        
+        # Disable beechunker logging
+        for logger_name in logging.Logger.manager.loggerDict:
+            if logger_name.startswith('beechunker'):
+                logging.getLogger(logger_name).setLevel(logging.CRITICAL)
+        
+        # Store model type
+        self.model_type = model_type
 
         # Initialize database
         self.db_path = config.get("monitor", "db_path")
@@ -55,7 +72,7 @@ class BeeChunkerDemo:
         # Initialize the optimizer
         try:
             self.optimizer = ChunkSizeOptimizer()
-            print("BeeChunker optimizer initialized.")
+            print(f"BeeChunker optimizer initialized with {model_type} model.")
         except Exception as e:
             print(f"Error initializing optimizer: {e}")
             sys.exit(1)
@@ -68,6 +85,107 @@ class BeeChunkerDemo:
         # Results storage
         self.results = []
         
+    def simulate_access_patterns(self, file_path: str, file_size: int):
+        """Simulate access patterns for a file using BeeGFS tools"""
+        print(f"Simulating access patterns for {file_path}...")
+        
+        # Get the current chunk size
+        current_chunk_size = self.optimizer.get_current_chunk_size(file_path)
+        if current_chunk_size is None:
+            current_chunk_size = 512  # Default
+        
+        # Determine appropriate access patterns for file size
+        file_size_mb = file_size / (1024 * 1024)
+        
+        if file_size_mb <= 1:  # Small files
+            read_size = 4096
+            write_size = 4096
+            read_count = 10
+            write_count = 5
+            throughput = 50.0
+        elif file_size_mb <= 100:  # Medium files
+            read_size = 65536
+            write_size = 32768
+            read_count = 20
+            write_count = 10
+            throughput = 150.0
+        else:  # Large files
+            read_size = 1048576
+            write_size = 524288
+            read_count = 50
+            write_count = 20
+            throughput = 300.0
+        
+        # Simulate the access patterns by directly inserting into the database
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            # Insert file metadata
+            cursor.execute("""
+                INSERT OR REPLACE INTO file_metadata 
+                (file_path, file_size, chunk_size, first_seen, last_seen)
+                VALUES (?, ?, ?, ?, ?)
+            """, (file_path, file_size, current_chunk_size * 1024, time.time(), time.time()))
+            
+            # Simulate read operations
+            for _ in range(read_count):
+                cursor.execute("""
+                    INSERT INTO file_access 
+                    (file_path, access_type, access_time, read_size, write_size)
+                    VALUES (?, ?, ?, ?, ?)
+                """, (file_path, "read", time.time(), read_size, 0))
+            
+            # Simulate write operations
+            for _ in range(write_count):
+                cursor.execute("""
+                    INSERT INTO file_access 
+                    (file_path, access_type, access_time, read_size, write_size)
+                    VALUES (?, ?, ?, ?, ?)
+                """, (file_path, "write", time.time(), 0, write_size))
+            
+            # Insert throughput metrics
+            cursor.execute("""
+                INSERT INTO throughput_metrics 
+                (file_path, start_time, end_time, bytes_transferred, operation_type, throughput_mbps)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (file_path, time.time()-1, time.time(), file_size, "read", throughput))
+            
+            conn.commit()
+            conn.close()
+            
+            # Trigger manual processing of access information
+            try:
+                # Use beegfs-ctl to get file info which might trigger monitoring
+                result = subprocess.run(
+                    ["beegfs-ctl", "--getentryinfo", file_path],
+                    capture_output=True,
+                    text=True
+                )
+                
+                # Simulate some actual file access with dd
+                # Read the first 1MB of the file
+                subprocess.run(
+                    f"dd if={file_path} of=/dev/null bs=1M count=1 iflag=direct",
+                    shell=True,
+                    capture_output=True
+                )
+                
+                # Write to the file using dd
+                subprocess.run(
+                    f"dd if=/dev/zero of={file_path} bs=1M count=1 oflag=direct conv=notrunc",
+                    shell=True,
+                    capture_output=True
+                )
+                
+            except subprocess.CalledProcessError as e:
+                print(f"Warning: Could not trigger BeeGFS monitoring: {e}")
+            
+            print(f"Simulated {read_count} reads and {write_count} writes with throughput {throughput} MB/s")
+            
+        except Exception as e:
+            print(f"Error simulating access patterns: {e}")
+
     def cleanup(self):
         """Clean up resources when done"""
         for observer in self.observers:
@@ -90,23 +208,18 @@ class BeeChunkerDemo:
         try:
             if os.path.exists(file_path):
                 os.remove(file_path)
-                print(f"File {file_path} removed successfully.")
                 return True
             else:
-                print(f"File {file_path} does not exist.")
                 return False
         except PermissionError:
             # If we can't remove it with normal permissions, use sudo
             try:
                 rm_cmd = ["sudo", "rm", "-f", file_path]
                 subprocess.run(rm_cmd, check=True, capture_output=True, text=True)
-                print(f"Removed file using sudo")
                 return True
-            except subprocess.SubprocessError as e:
-                print(f"Error removing file with sudo: {e}")
+            except subprocess.SubprocessError:
                 return False
-        except Exception as e:
-            print(f"Error removing file: {e}")
+        except Exception:
             return False
     
     def create_file(self, file_path: str, file_size: int) -> bool:
@@ -135,10 +248,8 @@ class BeeChunkerDemo:
                     remaining -= current_chunk
                     
             actual_size = os.path.getsize(file_path)
-            print(f"File {file_path} created with size {actual_size} bytes.")
             return True
-        except Exception as e:
-            print(f"Error creating file: {e}")
+        except Exception:
             return False
     
     def measure_file_performance(self, file_path: str, iterations: int = 3) -> Dict:
@@ -152,7 +263,6 @@ class BeeChunkerDemo:
             Dict: Dictionary with read/write speeds and throughput
         """
         if not os.path.exists(file_path):
-            print(f"File {file_path} does not exist. Cannot measure performance.")
             return None
             
         file_size = os.path.getsize(file_path)
@@ -200,7 +310,7 @@ class BeeChunkerDemo:
         }
     
     def optimize_file(self, file_path: str) -> bool:
-        """Optimize chunk size for a file
+        """Optimize chunk size for a file using specified model type
 
         Args:
             file_path (str): Path to the file
@@ -208,8 +318,8 @@ class BeeChunkerDemo:
         Returns:
             bool: True if optimization was successful, False otherwise
         """
-        print(f"Optimizing chunk size for {file_path}...")
-        return self.optimizer.optimize_file(file_path, force=True, dry_run=False)
+        print(f"Optimizing chunk size for {file_path} using {self.model_type} model...")
+        return self.optimizer.optimize_file(file_path, force=True, dry_run=False, model_type=self.model_type)
     
     def compare_performance(self, before: Dict, after: Dict) -> Dict:
         """Compare performance before and after optimization
@@ -280,6 +390,13 @@ class BeeChunkerDemo:
             print(f"Failed to create test file: {file_path}")
             return None
         
+        # Simulate access patterns
+        print(f"Simulating access patterns for {file_path}...")
+        self.simulate_access_patterns(file_path, file_size)
+        print("Access patterns simulated.")
+        
+        time.sleep(2)
+        
         # Wait for the file to be fully written
         time.sleep(1)
         
@@ -336,7 +453,7 @@ class BeeChunkerDemo:
     
     def run_demo(self):
         """Run the full demonstration with different file sizes"""
-        print("\n====== BeeChunker Optimization Demo ======")
+        print(f"\n====== BeeChunker Optimization Demo ({self.model_type.upper()} Model) ======")
         
         # Define file sizes for testing
         file_sizes = {
@@ -405,8 +522,17 @@ class BeeChunkerDemo:
 
 
 if __name__ == "__main__":
+    # Parse command line arguments for model type
+    import argparse
+    
+    parser = argparse.ArgumentParser(description='BeeChunker Demo Script')
+    parser.add_argument('--model', type=str, choices=['rf', 'som', 'xgb'], default='rf',
+                        help='Model type to use for optimization (default: rf)')
+    
+    args = parser.parse_args()
+    
     try:
-        demo = BeeChunkerDemo()
+        demo = BeeChunkerDemo(model_type=args.model)
         demo.run_demo()
     except KeyboardInterrupt:
         print("\nDemo interrupted by user.")

@@ -7,6 +7,7 @@ from typing import Optional
 from beechunker.common.beechunker_logging import setup_logging
 import logging
 from beechunker.ml.som import BeeChunkerSOM
+from beechunker.ml.random_forest import BeeChunkerRF
 from beechunker.common.config import config
 from beechunker.monitor.db_manager import DBManager
 
@@ -16,6 +17,7 @@ class ChunkSizeOptimizer:
         """Initialize the chunk size optimizer."""
         self.logger = logging.getLogger("beechunker.optimizer")
         self.som = BeeChunkerSOM()
+        self.rf = BeeChunkerRF()
         
         # Load the SOM model
         if not self.som.load():
@@ -30,8 +32,8 @@ class ChunkSizeOptimizer:
         self.max_chunk_size = config.get("optimizer", "max_chunk_size")
         
         self.logger.info("ChunkSizeOptimizer initialized.")
-        
-    def get_file_features(self, file_path) -> dict: # kept the return type as dict for simplicity for now
+    
+    def get_file_features(self, file_path) -> dict:
         """Extract features from the file for chunk size optimization (prediction using the SOM model)."""
         try:
             # Get the file metadata
@@ -69,13 +71,15 @@ class ChunkSizeOptimizer:
             # Default values if no data is found
             if not row or row[0]==0:
                 self.logger.warning(f"No access data found for {file_path}. Using default values.")
-                # Default values based on the file size
+                # Default values based on file size
                 if file_size < 1024 * 1024: # 1 MB
                     avg_read_size = 4096
                     avg_write_size = 4096
                     max_read_size = 8192
                     max_write_size = 8192
-                    throughput_mbps = 50.0  # Default small file throughput
+                    read_count = 10
+                    write_count = 5
+                    throughput_mbps = 50.0
                 elif file_size < 1024 * 1024 * 100: # 100 MB
                     avg_read_size = 65536
                     avg_write_size = 32768
@@ -83,15 +87,15 @@ class ChunkSizeOptimizer:
                     max_write_size = 65536
                     read_count = 20
                     write_count = 10
-                    throughput_mbps = 100.0  # Default medium file throughput
-                else:  # Large files (>=100MB)
+                    throughput_mbps = 100.0
+                else:  # Large files
                     avg_read_size = 1048576
                     avg_write_size = 524288
                     max_read_size = 4194304
                     max_write_size = 1048576
                     read_count = 50
                     write_count = 20
-                    throughput_mbps = 150.0  # Default large file throughput
+                    throughput_mbps = 150.0
                 
                 access_count = read_count + write_count
             else:
@@ -107,25 +111,21 @@ class ChunkSizeOptimizer:
                 write_count = row[9] or 0
                 throughput_mbps = row[10] or 100.0
 
-            # Calculate read/write ratio
-            read_write_ratio = read_count / max(1, write_count)
-
-            # Prepare features for prediction
+            # Convert to KB for compatibility with RF model
             features = {
-                'file_size': file_size,
-                'avg_read_size': avg_read_size,
-                'avg_write_size': avg_write_size,
-                'max_read_size': max_read_size,
-                'max_write_size': max_write_size,
-                'read_count': read_count,
-                'write_count': write_count,
+                'file_size_KB': file_size / 1024,
+                'avg_read_KB': avg_read_size / 1024,
+                'avg_write_KB': avg_write_size / 1024,
+                'max_read_KB': max_read_size / 1024,
+                'max_write_KB': max_write_size / 1024,
+                'read_ops': read_count,
+                'write_ops': write_count,
                 'access_count': access_count,
-                'read_write_ratio': read_write_ratio,
-                'dir_depth': dir_depth,
-                'throughput_mbps': throughput_mbps  # Add the throughput feature
+                'throughput_mbps': throughput_mbps,
+                'dir_depth': dir_depth
             }
             
-            # Add file extension as a feature
+            # Add file extension features if needed
             common_extensions = ['.txt', '.csv', '.log', '.dat', '.bin', '.json', '.xml', '.db']
             for ext in common_extensions:
                 features[f'ext_{ext}'] = 1 if file_extension == ext else 0
@@ -136,39 +136,57 @@ class ChunkSizeOptimizer:
             self.logger.error(f"Error extracting features from {file_path}: {e}")
             return None
     
-    def predict_chunk_size(self, file_path) -> int:
-        """Predict the optimal chunk size for a file using the SOM model."""
+    def predict_chunk_size(self, file_path, model_type: Optional[str]="rf") -> int:
+        """Predict the optimal chunk size for a file using the the mentioned ML model."""
         try:
             # Get file features
             features = self.get_file_features(file_path)
+            print(f"features : {features}")
             if features is None:
                 raise ValueError(f"Failed to extract features from {file_path}")
-                
-            # Convert dictionary to DataFrame for SOM prediction
+            
+            # Get the current chunk size
+            current_chunk_size = self.get_current_chunk_size(file_path)
+            if current_chunk_size is None:
+                current_chunk_size = 512  # Default value
+            
+            # Convert dictionary to DataFrame for prediction
             import pandas as pd
             df = pd.DataFrame([features])
             df['file_path'] = file_path
-            df['chunk_size'] = self.get_current_chunk_size(file_path) * 1024  # Convert KB to bytes to match expected format
             
-            # Predict chunk size using the SOM model
-            predictions = self.som.predict(df)
+            match model_type:
+                case "som":
+                    # SOM expects slightly different format
+                    df['chunk_size'] = current_chunk_size * 1024  # Convert KB to bytes to match expected format
+                    predictions = self.som.predict(df)
+                case "rf":
+                    # RF expects KB values
+                    df['chunk_size_KB'] = current_chunk_size
+                    predictions = self.rf.predict(df)
+                case "xgb":
+                    raise NotImplementedError("XGBoost model is not implemented yet.")
             
             if predictions is None or len(predictions) == 0:
-                raise ValueError("SOM prediction failed")
+                raise ValueError(f"{model_type} prediction failed")
                 
             # Extract the predicted chunk size from the result
-            optimal_chunk_size = int(predictions.iloc[0]['predicted_chunk_size'])
+            if model_type == "som":
+                optimal_chunk_size = int(predictions.iloc[0]['predicted_chunk_size'])
+            elif model_type == "rf":
+                optimal_chunk_size = int(predictions.iloc[0]['optimal_chunk_KB'])
             
             # Log the predicted chunk size
             self.logger.info(f"Predicted chunk size for {file_path}: {optimal_chunk_size}KB")
             self.logger.info(f"Features used for prediction: {features}")
             
             return optimal_chunk_size
-                
+        
         except Exception as e:
             self.logger.error(f"Error predicting chunk size for {file_path}: {e}")
             raise
-    
+
+
     def get_current_chunk_size(self, file_path) -> int:
         """Get the current chunk size of a file in KB from BeeGFS."""
         try:
@@ -353,7 +371,7 @@ class ChunkSizeOptimizer:
                         except Exception as e:
                             self.logger.error(f"Failed to restore from backup: {e}")
 
-    def optimize_file(self, file_path, force=False, dry_run=False, model_type: Optional[str] = None) -> bool:
+    def optimize_file(self, file_path, force=False, dry_run=False, model_type: Optional[str] = "rf") -> bool:
         """Optimize the chunk size of a single file."""
         # Check if the file exists
         if not os.path.exists(file_path):
@@ -368,7 +386,7 @@ class ChunkSizeOptimizer:
                 return False
             
             # Predict the optimal chunk size
-            optimal_chunk_size = self.predict_chunk_size(file_path)
+            optimal_chunk_size = self.predict_chunk_size(file_path, model_type=model_type)
             
             # Check if optimization is needed
             if current_chunk_size == optimal_chunk_size and not force:
@@ -483,7 +501,7 @@ class ChunkSizeOptimizer:
         self.logger.info(f"Directory {directory}: {optimized_count} optimized, {failed_count} failed, {skipped_count} skipped")
         return optimized_count, failed_count, skipped_count
     
-    def bulk_optimize(self, query_params=None, dry_run=False, limit=None):
+    def bulk_optimize(self, query_params=None, dry_run=False, limit=None, model_type: Optional[str] = "rf"):
         """Optimize chunk sizes for files based on database query."""
         try:
             conn = sqlite3.connect(self.db_path)
@@ -538,7 +556,7 @@ class ChunkSizeOptimizer:
             
             for file_path in files:
                 if os.path.exists(file_path):
-                    if self.optimize_file(file_path, dry_run=dry_run):
+                    if self.optimize_file(file_path, dry_run=dry_run, model_type=model_type):
                         optimized_count += 1
                     else:
                         failed_count += 1

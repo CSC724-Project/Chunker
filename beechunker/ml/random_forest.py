@@ -4,21 +4,32 @@ import pandas as pd
 import joblib
 from datetime import datetime
 from beechunker.common.beechunker_logging import setup_logging
-from sklearn.ensemble import RandomForestClassifier, HistGradientBoostingClassifier, StackingClassifier
+from sklearn.ensemble import (
+    RandomForestClassifier,
+    HistGradientBoostingClassifier,
+    StackingClassifier,
+)
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import accuracy_score, classification_report, confusion_matrix, roc_auc_score
+from sklearn.metrics import (
+    accuracy_score,
+    classification_report,
+    confusion_matrix,
+    roc_auc_score,
+)
 
 from beechunker.common.config import config
 from beechunker.ml.feature_extraction import OptimalThroughputProcessor
 
 logger = setup_logging("rf_classifier")
 
+
 class BeeChunkerRF:
     """
     Stacked Random Forest + Gradient Boosting classifier for OT prediction
     and subsequent optimal chunk size selection.
     """
+
     def __init__(self):
         """Initialize the ensemble model and paths, with a writable fallback."""
         self.model = None
@@ -34,8 +45,9 @@ class BeeChunkerRF:
             os.makedirs(fallback, exist_ok=True)
             self.models_dir = fallback
             logger.warning(
-                "Cannot write to configured models_dir '%s'. "
-                "Falling back to '%s'.", cfg_dir, fallback
+                "Cannot write to configured models_dir '%s'. " "Falling back to '%s'.",
+                cfg_dir,
+                fallback,
             )
 
     def set_last_training_time(self):
@@ -94,7 +106,8 @@ class BeeChunkerRF:
             return False
         finally:
             for f in [tmp_in]:
-                if os.path.exists(f): os.remove(f)
+                if os.path.exists(f):
+                    os.remove(f)
 
         # require minimum samples
         min_s = config.get("ml", "min_training_samples")
@@ -120,15 +133,13 @@ class BeeChunkerRF:
         n_est = config.get("ml", "n_estimators")
         rf = RandomForestClassifier(
             n_estimators=n_est,
-            max_features='sqrt',
-            class_weight='balanced',
+            max_features="sqrt",
+            class_weight="balanced",
             random_state=42,
             n_jobs=-1,
-            
         )
         hgb = HistGradientBoostingClassifier(
-            max_iter=config.get("ml", "hgb_iter"),
-            random_state=42
+            max_iter=config.get("ml", "hgb_iter"), random_state=42
         )
 
         rf.fit(X_train, y_train)
@@ -137,11 +148,11 @@ class BeeChunkerRF:
 
         # stacking ensemble
         stack = StackingClassifier(
-            estimators=[('rf', rf), ('hgb', hgb)],
+            estimators=[("rf", rf), ("hgb", hgb)],
             final_estimator=LogisticRegression(
-                class_weight='balanced', solver='liblinear', max_iter=1000
+                class_weight="balanced", solver="liblinear", max_iter=1000
             ),
-            cv='prefit'
+            cv="prefit",
         )
         stack.fit(X_train, y_train)
         self.model = stack
@@ -168,9 +179,9 @@ class BeeChunkerRF:
         logger.info(f"Stacked model saved to {ensemble_path}")
 
         # persist base learners
-        rf_path  = os.path.join(self.models_dir, "rf_base.joblib")
+        rf_path = os.path.join(self.models_dir, "rf_base.joblib")
         hgb_path = os.path.join(self.models_dir, "hgb_base.joblib")
-        joblib.dump(rf,  rf_path)
+        joblib.dump(rf, rf_path)
         joblib.dump(hgb, hgb_path)
         logger.info(f"RF base learner saved to {rf_path}")
         logger.info(f"HGB base learner saved to {hgb_path}")
@@ -181,7 +192,9 @@ class BeeChunkerRF:
         logger.info(f"Logistic meta‑learner saved to {meta_path}")
 
         # persist feature names
-        joblib.dump(self.feature_names, os.path.join(self.models_dir, "feature_names.joblib"))
+        joblib.dump(
+            self.feature_names, os.path.join(self.models_dir, "feature_names.joblib")
+        )
 
         # record training time
         self.set_last_training_time()
@@ -191,7 +204,6 @@ class BeeChunkerRF:
             os.remove(tmp_out)
 
         return True
-        
 
     def load(self) -> bool:
         """
@@ -204,36 +216,34 @@ class BeeChunkerRF:
         try:
             self.model = joblib.load(path)
             logger.info("Model loaded from %s", path)
-            self.feature_names = joblib.load(os.path.join(self.models_dir, "feature_names.joblib"))
+            self.feature_names = joblib.load(
+                os.path.join(self.models_dir, "feature_names.joblib")
+            )
             return True
         except Exception as e:
             logger.error(f"Error loading model: {e}")
             return False
 
-    # @staticmethod
-    # def find_optimal_chunk_size(model, row, candidate_chunks, tolerance=1e-4):
-    #     """
-    #     For each candidate chunk size, compute P(OT=1) and choose the size
-    #     with the highest probability (breaking ties by larger chunk).
-    #     """
-    #     probs = []
-    #     for c in candidate_chunks:
-    #         feat = [row['file_size_KB'], c, row['access_count'], row['access_count_label']]
-    #         probs.append(model.predict_proba([feat])[0, 1])
-    #     arr = np.array(probs)
-    #     idxs = np.where(np.abs(arr - arr.max()) < tolerance)[0]
-    #     return int(candidate_chunks[idxs].max()), float(arr.max())
-
+    # In beechunker/ml/random_forest.py, around line 150-160:
     @staticmethod
-    def find_optimal_chunk_size(model, row, feature_names, candidate_chunks, tolerance=1e-4):
+    def find_optimal_chunk_size(
+        model, row, feature_names, candidate_chunks, tolerance=1e-4
+    ):
         probs = []
         for c in candidate_chunks:
             # make a copy of the full row
             rc = row.copy()
-            rc['chunk_size_KB'] = c
+            rc["chunk_size_KB"] = c
             # select exactly the columns the model was trained on, in the same order
-            x = rc[feature_names].values.reshape(1, -1)
-            probs.append(model.predict_proba(x)[0,1])
+            try:
+                x = rc[feature_names].values.reshape(1, -1)
+            except KeyError as e:
+                logger.warning(f"Missing feature in row: {e}")
+                # Fallback to only using available features
+                available_features = [f for f in feature_names if f in rc]
+                x = rc[available_features].values.reshape(1, -1)
+
+            probs.append(model.predict_proba(x)[0, 1])
         arr = np.array(probs)
         idxs = np.where(np.abs(arr - arr.max()) < tolerance)[0]
         return int(candidate_chunks[idxs].max()), float(arr.max())
@@ -247,17 +257,46 @@ class BeeChunkerRF:
             logger.error("Model not loaded. Cannot predict.")
             return None
 
+        # Create a copy to avoid modifying the original
+        df_input = df_raw.copy()
+
+        # Ensure file_size_KB exists
+        if 'file_size_KB' not in df_input.columns and 'file_size' in df_input.columns:
+            df_input['file_size_KB'] = df_input['file_size'] / 1024
+        
+        # Ensure chunk_size_KB exists
+        if 'chunk_size_KB' not in df_input.columns and 'chunk_size' in df_input.columns:
+            df_input['chunk_size_KB'] = df_input['chunk_size'] / 1024
+        elif 'chunk_size_KB' not in df_input.columns:
+            df_input['chunk_size_KB'] = 512  # Default chunk size in KB
+        
+        # Convert throughput_mbps to throughput_KBps if present
+        if 'throughput_mbps' in df_input.columns:
+            df_input['throughput_KBps'] = df_input['throughput_mbps'] * 1024  # Convert MB/s to KB/s
+        elif 'throughput_KBps' not in df_input.columns:
+            df_input['throughput_KBps'] = 100 * 1024  # Default to 100 MB/s in KB/s
+
+        # Map existing features to expected feature names
+        feature_mapping = {
+            'avg_read_size': 'avg_read_KB',
+            'avg_write_size': 'avg_write_KB',
+            'max_read_size': 'max_read_KB',
+            'max_write_size': 'max_write_KB',
+            'read_count': 'read_ops',
+            'write_count': 'write_ops'
+        }
+        
+        for old_name, new_name in feature_mapping.items():
+            if old_name in df_input.columns:
+                df_input[new_name] = df_input[old_name] / 1024 if 'size' in old_name else df_input[old_name]
+        
         # preprocess OT labels
         tmp = os.path.join(self.models_dir, "temp_pred.csv")
         
-        df_raw.to_csv(tmp, index=False)
-        print("1")
+        df_input.to_csv(tmp, index=False)
         proc = OptimalThroughputProcessor(tmp, tmp, quantile=config.get("ml", "ot_quantile"))
-        print("2")
         proc.run()
-        print("3")
         df = pd.read_csv(tmp)
-        print(df.shape[1])
 
         # cleanup
         os.remove(tmp)
