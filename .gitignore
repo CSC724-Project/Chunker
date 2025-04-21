@@ -179,3 +179,7 @@ cython_debug/
 scratch
 
 README2.md
+
+check_xgb.py
+test.csv
+train.csv

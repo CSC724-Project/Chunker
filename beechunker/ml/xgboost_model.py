@@ -9,6 +9,7 @@ from sklearn.model_selection import KFold
 from sklearn.preprocessing import StandardScaler
 from beechunker.common.config import config
 from beechunker.common.beechunker_logging import setup_logging
+import json
 
 logger = setup_logging("xgboost_model")
 
@@ -177,6 +178,42 @@ class BeeChunkerXGBoost:
             # Load and clean data
             df = pd.read_csv(log_path)
             
+            # Map the column names to what the model expects
+            column_mapping = {
+                'file_size_KB': 'file_size',
+                'chunk_size_KB': 'chunk_size',
+                'read_ops': 'read_count',
+                'write_ops': 'write_count',
+                'avg_read_KB': 'avg_read_size',
+                'avg_write_KB': 'avg_write_size',
+                'max_read_KB': 'max_read_size',
+                'max_write_KB': 'max_write_size',
+                'throughput_KBps': 'throughput_mbps'
+            }
+
+            # Rename columns
+            df = df.rename(columns=column_mapping)
+
+            # Convert units (KB to bytes and KBps to MBps)
+            if 'file_size' in df.columns:
+                df['file_size'] *= 1024  # Convert KB to bytes
+            if 'chunk_size' in df.columns:
+                df['chunk_size'] *= 1024  # Convert KB to bytes
+            if 'avg_read_size' in df.columns:
+                df['avg_read_size'] *= 1024  # Convert KB to bytes
+            if 'avg_write_size' in df.columns:
+                df['avg_write_size'] *= 1024  # Convert KB to bytes
+            if 'max_read_size' in df.columns:
+                df['max_read_size'] *= 1024  # Convert KB to bytes
+            if 'max_write_size' in df.columns:
+                df['max_write_size'] *= 1024  # Convert KB to bytes
+            if 'throughput_mbps' in df.columns:
+                df['throughput_mbps'] /= 1024  # Convert KBps to MBps
+
+            # Clean data
+            required_columns = ['file_size', 'chunk_size', 'read_count', 'write_count', 'throughput_mbps']
+            df = df.dropna(subset=required_columns)
+            
             # Clean data
             df = df.dropna(subset=['file_size', 'chunk_size', 'read_count', 'write_count', 
                                  'throughput_mbps'])
@@ -311,6 +348,31 @@ class BeeChunkerXGBoost:
             if self.model is None:
                 if not self.load():
                     raise RuntimeError("Model not loaded")
+            
+            
+             # Map column names if needed
+            column_mapping = {
+                'file_size_KB': 'file_size',
+                'chunk_size_KB': 'chunk_size',
+                'read_ops': 'read_count',
+                'write_ops': 'write_count',
+                'avg_read_KB': 'avg_read_size',
+                'avg_write_KB': 'avg_write_size',
+                'max_read_KB': 'max_read_size',
+                'max_write_KB': 'max_write_size',
+                'throughput_KBps': 'throughput_mbps'
+            }
+            
+            # Rename columns if they exist in the mapping
+            df = df.rename(columns={k: v for k, v in column_mapping.items() if k in df.columns})
+            
+            # Convert units if needed
+            if 'file_size' in df.columns and 'file_size_KB' in df.columns:
+                df['file_size'] = df['file_size'] * 1024  # KB to bytes
+            if 'chunk_size' in df.columns and 'chunk_size_KB' in df.columns:
+                df['chunk_size'] = df['chunk_size'] * 1024  # KB to bytes
+            if 'throughput_mbps' in df.columns and 'throughput_KBps' in df.columns:
+                df['throughput_mbps'] = df['throughput_mbps'] / 1024  # KBps to MBps
             
             # Define chunk size options (in KB)
             chunk_size_options = [128, 256, 512, 1024, 2048, 4096, 8192]
