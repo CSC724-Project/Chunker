@@ -7,7 +7,7 @@ from beechunker.ml.random_forest import BeeChunkerRF
 
 def main():
     # Paths
-    raw_csv = "/home/agupta72/Chunker/train.csv"
+    raw_csv = "/home/agupta72/Chunker/test_new.csv"
     models_dir = os.getenv("BEECHUNKER_MODELS_DIR", "/home/agupta72/Chunker/")
 
     # 1) Check raw data exists
@@ -49,7 +49,7 @@ def main():
     preds = predictor.predict(sample_df)
     print("Sample predictions:\n", preds)
     assert not preds.empty, "No predictions returned"
-    required_cols = {"file_path","file_size_KB","current_chunk_KB","optimal_chunk_KB","probability"}
+    required_cols = {"file_path","file_size_KB","current_chunk_KB","optimal_chunk_KB","confidance"}
     missing = required_cols - set(preds.columns)
     assert not missing, f"Missing prediction columns: {missing}"
     print("Prediction test passed.")
