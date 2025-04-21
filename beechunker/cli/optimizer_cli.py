@@ -52,14 +52,15 @@ def run(interval, min_access, dry_run):
 @click.argument('file_path', type=click.Path(exists=True))
 @click.option('--force', '-f', is_flag=True, help='Force optimization even if current size is optimal')
 @click.option('--dry-run', '-d', is_flag=True, help='Do not actually change chunk sizes')
-def optimize_file(file_path, force, dry_run):
+@click.option('--model-type', '-m', type=click.Choice(['rf', 'som', 'xgb']), default='rf', help='Model type to use for optimization')
+def optimize_file(file_path, force, dry_run, model_type):
     """Optimize chunk size for a single file."""
     logger = setup_logging("optimizer")
     
     try:
         optimizer = ChunkSizeOptimizer()
         
-        if optimizer.optimize_file(file_path, force=force, dry_run=dry_run):
+        if optimizer.optimize_file(file_path, force=force, dry_run=dry_run, model_type=model_type):
             click.echo(f"Successfully optimized {file_path}")
         else:
             click.echo(f"Failed to optimize {file_path}")
@@ -69,7 +70,7 @@ def optimize_file(file_path, force, dry_run):
         logger.error(f"Error: {e}")
         click.echo(f"Error: {e}")
         sys.exit(1)
-
+        
 @cli.command()
 @click.argument('directory', type=click.Path(exists=True, file_okay=False, dir_okay=True))
 @click.option('--recursive', '-r', is_flag=True, help='Recursively process subdirectories')
@@ -78,7 +79,8 @@ def optimize_file(file_path, force, dry_run):
 @click.option('--file-type', '-t', multiple=True, help='File extensions to include (e.g., .txt)')
 @click.option('--min-size', type=int, help='Minimum file size in bytes')
 @click.option('--max-size', type=int, help='Maximum file size in bytes')
-def optimize_dir(directory, recursive, force, dry_run, file_type, min_size, max_size):
+@click.option('--model-type', '-m', type=click.Choice(['rf', 'som', 'xgb']), default='rf', help='Model type to use for optimization')
+def optimize_dir(directory, recursive, force, dry_run, file_type, min_size, max_size, model_type):
     """Optimize chunk sizes for all files in a directory."""
     logger = setup_logging("optimizer")
     
@@ -93,7 +95,8 @@ def optimize_dir(directory, recursive, force, dry_run, file_type, min_size, max_
             dry_run=dry_run,
             file_types=file_types,
             min_size=min_size,
-            max_size=max_size
+            max_size=max_size,
+            model_type=model_type  # Add this parameter
         )
         
         click.echo(f"Optimization complete: {optimized} files optimized, {failed} failed, {skipped} skipped")
@@ -113,7 +116,8 @@ def optimize_dir(directory, recursive, force, dry_run, file_type, min_size, max_
 @click.option('--extension', '-e', multiple=True, help='File extensions to include')
 @click.option('--limit', '-l', type=int, help='Maximum number of files to process')
 @click.option('--dry-run', '-d', is_flag=True, help='Do not actually change chunk sizes')
-def bulk_optimize(min_size, max_size, min_access, extension, limit, dry_run):
+@click.option('--model-type', '-m', type=click.Choice(['rf', 'som', 'xgb']), default='rf', help='Model type to use for optimization')
+def bulk_optimize(min_size, max_size, min_access, extension, limit, dry_run, model_type):
     """Bulk optimize files based on database query."""
     logger = setup_logging("optimizer")
     
@@ -132,7 +136,7 @@ def bulk_optimize(min_size, max_size, min_access, extension, limit, dry_run):
             query_params['extensions'] = extension
         
         # Run bulk optimization
-        optimized, failed = optimizer.bulk_optimize(query_params, dry_run=dry_run, limit=limit)
+        optimized, failed = optimizer.bulk_optimize(query_params, dry_run=dry_run, limit=limit, model_type=model_type)
         
         click.echo(f"Bulk optimization complete: {optimized} files optimized, {failed} failed")
         
@@ -146,7 +150,8 @@ def bulk_optimize(min_size, max_size, min_access, extension, limit, dry_run):
 
 @cli.command()
 @click.argument('file_path', type=click.Path(exists=True))
-def analyze(file_path):
+@click.option('--model-type', '-m', type=click.Choice(['rf', 'som', 'xgb']), default='rf', help='Model type to use for prediction')
+def analyze(file_path, model_type):
     """Analyze a file and show predicted optimal chunk size without changing it."""
     logger = setup_logging("optimizer")
     
@@ -163,7 +168,7 @@ def analyze(file_path):
         features = optimizer.get_file_features(file_path)
         
         # Predict optimal chunk size
-        optimal_size = optimizer.predict_chunk_size(file_path)
+        optimal_size = optimizer.predict_chunk_size(file_path, model_type=model_type)
         
         # Print analysis
         click.echo(f"File: {file_path}")

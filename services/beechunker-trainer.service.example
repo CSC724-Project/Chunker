@@ -1,0 +1,16 @@
+[Unit]
+Description=BeeChunker Trainer Service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=jgajbha
+WorkingDirectory=/home/jgajbha/BeeChunker
+Environment="BEECHUNKER_CONFIG=/home/jgajbha/beechunker_data/config.json"
+ExecStart=/home/jgajbha/BeeChunker/venv/bin/python3.12 beechunker/cli/trainer_cli.py train
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
