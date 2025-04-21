@@ -10,6 +10,7 @@ from typing import List, Dict, Optional, Tuple
 import pandas as pd
 from pathlib import Path
 import logging
+import sqlite3
 
 from beechunker.common.config import config
 from beechunker.monitor.db_manager import DBManager
@@ -84,6 +85,107 @@ class BeeChunkerDemo:
         # Results storage
         self.results = []
         
+    def simulate_access_patterns(self, file_path: str, file_size: int):
+        """Simulate access patterns for a file using BeeGFS tools"""
+        print(f"Simulating access patterns for {file_path}...")
+        
+        # Get the current chunk size
+        current_chunk_size = self.optimizer.get_current_chunk_size(file_path)
+        if current_chunk_size is None:
+            current_chunk_size = 512  # Default
+        
+        # Determine appropriate access patterns for file size
+        file_size_mb = file_size / (1024 * 1024)
+        
+        if file_size_mb <= 1:  # Small files
+            read_size = 4096
+            write_size = 4096
+            read_count = 10
+            write_count = 5
+            throughput = 50.0
+        elif file_size_mb <= 100:  # Medium files
+            read_size = 65536
+            write_size = 32768
+            read_count = 20
+            write_count = 10
+            throughput = 150.0
+        else:  # Large files
+            read_size = 1048576
+            write_size = 524288
+            read_count = 50
+            write_count = 20
+            throughput = 300.0
+        
+        # Simulate the access patterns by directly inserting into the database
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            # Insert file metadata
+            cursor.execute("""
+                INSERT OR REPLACE INTO file_metadata 
+                (file_path, file_size, chunk_size, first_seen, last_seen)
+                VALUES (?, ?, ?, ?, ?)
+            """, (file_path, file_size, current_chunk_size * 1024, time.time(), time.time()))
+            
+            # Simulate read operations
+            for _ in range(read_count):
+                cursor.execute("""
+                    INSERT INTO file_access 
+                    (file_path, access_type, access_time, read_size, write_size)
+                    VALUES (?, ?, ?, ?, ?)
+                """, (file_path, "read", time.time(), read_size, 0))
+            
+            # Simulate write operations
+            for _ in range(write_count):
+                cursor.execute("""
+                    INSERT INTO file_access 
+                    (file_path, access_type, access_time, read_size, write_size)
+                    VALUES (?, ?, ?, ?, ?)
+                """, (file_path, "write", time.time(), 0, write_size))
+            
+            # Insert throughput metrics
+            cursor.execute("""
+                INSERT INTO throughput_metrics 
+                (file_path, start_time, end_time, bytes_transferred, operation_type, throughput_mbps)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (file_path, time.time()-1, time.time(), file_size, "read", throughput))
+            
+            conn.commit()
+            conn.close()
+            
+            # Trigger manual processing of access information
+            try:
+                # Use beegfs-ctl to get file info which might trigger monitoring
+                result = subprocess.run(
+                    ["beegfs-ctl", "--getentryinfo", file_path],
+                    capture_output=True,
+                    text=True
+                )
+                
+                # Simulate some actual file access with dd
+                # Read the first 1MB of the file
+                subprocess.run(
+                    f"dd if={file_path} of=/dev/null bs=1M count=1 iflag=direct",
+                    shell=True,
+                    capture_output=True
+                )
+                
+                # Write to the file using dd
+                subprocess.run(
+                    f"dd if=/dev/zero of={file_path} bs=1M count=1 oflag=direct conv=notrunc",
+                    shell=True,
+                    capture_output=True
+                )
+                
+            except subprocess.CalledProcessError as e:
+                print(f"Warning: Could not trigger BeeGFS monitoring: {e}")
+            
+            print(f"Simulated {read_count} reads and {write_count} writes with throughput {throughput} MB/s")
+            
+        except Exception as e:
+            print(f"Error simulating access patterns: {e}")
+
     def cleanup(self):
         """Clean up resources when done"""
         for observer in self.observers:
@@ -287,6 +389,13 @@ class BeeChunkerDemo:
         if not self.create_file(file_path, file_size):
             print(f"Failed to create test file: {file_path}")
             return None
+        
+        # Simulate access patterns
+        print(f"Simulating access patterns for {file_path}...")
+        self.simulate_access_patterns(file_path, file_size)
+        print("Access patterns simulated.")
+        
+        time.sleep(2)
         
         # Wait for the file to be fully written
         time.sleep(1)
