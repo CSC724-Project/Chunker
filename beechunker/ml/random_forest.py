@@ -235,29 +235,35 @@ class BeeChunkerRF:
             logger.error(f"Error loading model: {e}")
             return False
 
-    # In beechunker/ml/random_forest.py, around line 150-160:
     @staticmethod
-    def find_optimal_chunk_size(
-        model, row, feature_names, candidate_chunks, tolerance=1e-4
-    ):
+    def find_optimal_chunk_size(model, row, feature_names, candidate_chunks, tolerance=1e-4):
+        """
+        For each candidate chunk size, compute P(OT=1) and choose the size
+        with the highest probability (breaking ties by larger chunk).
+        """
         probs = []
+        # build a probability for each possible chunk size
         for c in candidate_chunks:
-            # make a copy of the full row
             rc = row.copy()
-            rc["chunk_size_KB"] = c
-            # select exactly the columns the model was trained on, in the same order
-            try:
-                x = rc[feature_names].values.reshape(1, -1)
-            except KeyError as e:
-                logger.warning(f"Missing feature in row: {e}")
-                # Fallback to only using available features
-                available_features = [f for f in feature_names if f in rc]
-                x = rc[available_features].values.reshape(1, -1)
+            rc['chunk_size_KB'] = c
+            # construct the feature vector in the exact order used at training
+            x = rc[feature_names].values.reshape(1, -1)
+            p = model.predict_proba(x)[0, 1]
+            probs.append(p)
 
-            probs.append(model.predict_proba(x)[0, 1])
         arr = np.array(probs)
-        idxs = np.where(np.abs(arr - arr.max()) < tolerance)[0]
-        return int(candidate_chunks[idxs].max()), float(arr.max())
+        max_prob = arr.max()
+
+        # collect all chunks within tolerance of the maximum probability
+        best_chunks = [
+            candidate_chunks[i]
+            for i, p in enumerate(arr)
+            if abs(p - max_prob) < tolerance
+        ]
+
+        # pick the largest chunk size among the ties
+        optimal_chunk = max(best_chunks)
+        return int(optimal_chunk), float(max_prob)
 
     def predict(self, df_raw):
         """

@@ -1,0 +1,3 @@
+file_path,file_size_KB,chunk_size_KB,access_count,avg_read_KB,avg_write_KB,max_read_KB,max_write_KB,read_ops,write_ops,throughput_KBps,error_message,access_count_label,combination,OT
+/mnt/beegfs/testfile_5_uE9cf5.dat,204800,8192,10,221.4,240.4,380,393,5,5,658109.83,,1,204800 | 1,1
+/mnt/beegfs/testfile_5_uE9cf5.dat,204800,32768,15,298.8,256.2,483,446,10,5,647362.1,,2,204800 | 2,1
