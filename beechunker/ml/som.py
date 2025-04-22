@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 from beechunker.common.config import config
 from beechunker.ml.feature_engineering import FeatureEngineering
 
-logger = setup_logging("som")
+logger = setup_logging("")
 
 class BeeChunkerSOM:
     """
