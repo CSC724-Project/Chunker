@@ -99,25 +99,45 @@ def test_xgboost_pipeline():
     test_df = load_prediction_data(predict_data_path)
     logger.info(f"Loaded {len(test_df)} test samples")
     
-    # Make predictions
+    # Make predictions one by one for each test sample
     logger.info("Making predictions...")
-    predictions = model.predict(test_df)
+    predictions = []
     
-    if predictions is None:
-        logger.error("Failed to make predictions")
+    for idx, row in test_df.iterrows():
+        # Create a DataFrame with just this row
+        sample_df = pd.DataFrame([row])
+        
+        # Get the optimal chunk size for this sample
+        optimal_chunk_size = model.predict(sample_df)
+        
+        if optimal_chunk_size is None:
+            logger.error(f"Failed to make prediction for sample {idx}")
+            continue
+            
+        # Get current chunk size for comparison
+        current_chunk_size = row['chunk_size_KB']
+        
+        # Store prediction details
+        predictions.append({
+            'file_path': row['file_path'],
+            'file_size_KB': row['file_size_KB'],
+            'current_chunk_size': current_chunk_size,
+            'optimal_chunk_size': optimal_chunk_size,
+            'needs_optimization': current_chunk_size != optimal_chunk_size
+        })
+    
+    if not predictions:
+        logger.error("Failed to make any valid predictions")
         return False
     
     # Print results
     logger.info("\nPrediction Results:")
-    for _, row in predictions.iterrows():
-        logger.info(f"\nFile: {row['file_path']}")
-        logger.info(f"Current chunk size: {row['current_chunk_size']}KB")
-        logger.info(f"Predicted optimal chunk size: {row['predicted_chunk_size']}KB")
-        logger.info(f"Current probability: {row['current_probability']:.3f}")
-        logger.info(f"Predicted probability: {row['predicted_probability']:.3f}")
-        logger.info(f"Needs optimization: {row['needs_optimization']}")
-        if row['needs_optimization']:
-            logger.info(f"Expected improvement: {row['optimization_gain']:.3f}")
+    for result in predictions:
+        logger.info(f"\nFile: {result['file_path']}")
+        logger.info(f"File size: {result['file_size_KB']}KB")
+        logger.info(f"Current chunk size: {result['current_chunk_size']}KB")
+        logger.info(f"Optimal chunk size: {result['optimal_chunk_size']}KB")
+        logger.info(f"Needs optimization: {result['needs_optimization']}")
     
     return True
 
