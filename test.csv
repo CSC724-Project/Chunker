@@ -1,2 +1,0 @@
-file_path,file_size_KB,chunk_size_KB,access_count,avg_read_KB,avg_write_KB,max_read_KB,max_write_KB,read_ops,write_ops,throughput_KBps,error_message
-/mnt/beegfs/testfile_5_8XLQHa.dat,5120,64,15,26.00,39.70,43,55,5,10,67533.64,
