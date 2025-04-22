@@ -332,4 +332,14 @@ class BeeChunkerRF:
                 'optimal_chunk_KB': opt,
                 'confidance': prob
             })
-        return pd.DataFrame(records)
+
+        
+        # convert to DataFrame
+        df_preds = pd.DataFrame(records)
+
+        # pick only the one with highest confidence
+        best_idx = df_preds['confidance'].idxmax()
+        best_row = df_preds.loc[[best_idx]].reset_index(drop=True)
+        best_chunk  = int(df_preds.loc[best_idx, 'optimal_chunk_KB'])
+
+        return best_chunk

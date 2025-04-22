@@ -1,3 +1,46 @@
+import pandas as pd
+from beechunker.ml.random_forest import BeeChunkerRF
+
+def test_manual_df_predict():
+    # ── Manually define your test DataFrame here ───────────────
+    data = [
+        {
+            'file_path': 'fileA',
+            'file_size_KB': 204800,
+            'chunk_size_KB': 1733,
+            'access_count': 20,
+            'avg_read_KB': 57.7,
+            'avg_write_KB': 70.3,
+            'max_read_KB': 130,
+            'max_write_KB': 124,
+            'read_ops': 12,
+            'write_ops': 8,
+            'throughput_KBps': 25624.04,
+            'error_message': ''
+        }
+    ]
+    df_input = pd.DataFrame(data)
+    print("Input DataFrame:")
+    print(df_input)
+
+    # Initialize and load the model
+    predictor = BeeChunkerRF()
+    if not predictor.load():
+        raise RuntimeError("Failed to load trained RF model. Please train the model first.")
+    print("Model loaded successfully.")
+
+    # Run prediction
+    optimal_chunk = predictor.predict(df_input)
+    print("\nOptimal chunk size recommendation (KB):", optimal_chunk)
+
+
+if __name__ == '__main__':
+    test_manual_df_predict()
+
+
+
+
+
 # import os
 # import pandas as pd
 # import joblib
@@ -62,56 +105,56 @@
 
 
 
-import os
-import pandas as pd
+# import os
+# import pandas as pd
 
-from beechunker.ml.random_forest import BeeChunkerRF
-from beechunker.ml.feature_extraction import OptimalThroughputProcessor
+# from beechunker.ml.random_forest import BeeChunkerRF
+# from beechunker.ml.feature_extraction import OptimalThroughputProcessor
 
-# Configuration
-default_raw_csv = "/home/agupta72/Chunker/test_new.csv"
-default_models_dir = os.getenv("BEECHUNKER_MODELS_DIR", "/home/agupta72/Chunker/models")
-
-
-def main(raw_csv=default_raw_csv, models_dir=default_models_dir):
-    # 1) Ensure raw input exists
-    if not os.path.exists(raw_csv):
-        raise FileNotFoundError(f"Raw CSV not found at {raw_csv}")
-
-    # 2) Load and preprocess OT labels (optional, if you want to inspect)
-    processed_csv = os.path.join(models_dir, "test_processed.csv")
-    proc = OptimalThroughputProcessor(raw_csv, processed_csv, quantile=0.65)
-    proc.run()
-    df_proc = pd.read_csv(processed_csv)
-    print(f"Processed OT data shape: {df_proc.shape}")
-
-    # 3) Load the trained model
-    predictor = BeeChunkerRF()
-    if not predictor.load():
-        raise RuntimeError("Failed to load trained model from " + models_dir)
-    print("Model loaded successfully from {}".format(models_dir))
-
-    # 4) Read input features for prediction
-    df_input = pd.read_csv(raw_csv)
-    print(f"Input data shape: {df_input.shape}")
-
-    # 5) Predict optimal chunk sizes
-    predictions = predictor.predict(df_input)
-    if predictions is None:
-        raise RuntimeError("Prediction returned None. Check model and input preprocessing.")
-
-    # 6) Display results
-    print("Sample predictions:")
-    print(predictions.head())
-
-    # 7) Example: optimal chunk for first row
-    first_opt = int(predictions.iloc[0]['optimal_chunk_KB'])
-    first_prob = float(predictions.iloc[0].get('confidence', predictions.iloc[0].get('confidance', None)))
-    print(f"Optimal chunk size for first file: {first_opt} KB (confidence {first_prob:.4f})")
+# # Configuration
+# default_raw_csv = "/home/agupta72/Chunker/test_new.csv"
+# default_models_dir = os.getenv("BEECHUNKER_MODELS_DIR", "/home/agupta72/Chunker/models")
 
 
-if __name__ == '__main__':
-    main()
+# def main(raw_csv=default_raw_csv, models_dir=default_models_dir):
+#     # 1) Ensure raw input exists
+#     if not os.path.exists(raw_csv):
+#         raise FileNotFoundError(f"Raw CSV not found at {raw_csv}")
+
+#     # 2) Load and preprocess OT labels (optional, if you want to inspect)
+#     processed_csv = os.path.join(models_dir, "test_processed.csv")
+#     proc = OptimalThroughputProcessor(raw_csv, processed_csv, quantile=0.65)
+#     proc.run()
+#     df_proc = pd.read_csv(processed_csv)
+#     print(f"Processed OT data shape: {df_proc.shape}")
+
+#     # 3) Load the trained model
+#     predictor = BeeChunkerRF()
+#     if not predictor.load():
+#         raise RuntimeError("Failed to load trained model from " + models_dir)
+#     print("Model loaded successfully from {}".format(models_dir))
+
+#     # 4) Read input features for prediction
+#     df_input = pd.read_csv(raw_csv)
+#     print(f"Input data shape: {df_input.shape}")
+
+#     # 5) Predict optimal chunk sizes
+#     predictions = predictor.predict(df_input)
+#     if predictions is None:
+#         raise RuntimeError("Prediction returned None. Check model and input preprocessing.")
+
+#     # 6) Display results
+#     print("Sample predictions:")
+#     print(predictions.head())
+
+#     # 7) Example: optimal chunk for first row
+#     first_opt = int(predictions.iloc[0]['optimal_chunk_KB'])
+#     first_prob = float(predictions.iloc[0].get('confidence', predictions.iloc[0].get('confidance', None)))
+#     print(f"Optimal chunk size for first file: {first_opt} KB (confidence {first_prob:.4f})")
+
+
+# if __name__ == '__main__':
+#     main()
 
 
 
