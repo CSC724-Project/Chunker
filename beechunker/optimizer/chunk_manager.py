@@ -140,18 +140,20 @@ class ChunkSizeOptimizer:
     
     def convert_features_to_xgboost_format(self, features: dict) -> dict:
         """Convert features from file system format to XGBoost format."""
-        # XGBoost expects features in bytes and with different names
+        # XGBoost expects these specific column names
         xgboost_features = {
-            'file_size': features['file_size_KB'] * 1024,  # Convert KB to bytes
-            'avg_read_size': features['avg_read_KB'] * 1024,  # Convert KB to bytes
-            'avg_write_size': features['avg_write_KB'] * 1024,  # Convert KB to bytes
-            'max_read_size': features['max_read_KB'] * 1024,  # Convert KB to bytes
-            'max_write_size': features['max_write_KB'] * 1024,  # Convert KB to bytes
-            'read_count': features['read_ops'],  # Rename
-            'write_count': features['write_ops'],  # Rename
-            'throughput_mbps': features['throughput_mbps']  # Already in correct format/name
+            'file_path': '',  # Add empty file_path as it's required
+            'file_size_KB': features['file_size_KB'],  # Keep in KB as expected by model
+            'avg_read_KB': features['avg_read_KB'],
+            'avg_write_KB': features['avg_write_KB'],
+            'max_read_KB': features['max_read_KB'],
+            'max_write_KB': features['max_write_KB'],
+            'read_ops': features['read_ops'],
+            'write_ops': features['write_ops'],
+            'access_count': features['access_count'],  # Add access_count feature
+            'throughput_KBps': features['throughput_mbps'] * 1024 / 8,  # Convert Mbps to KBps
+            'chunk_size_KB': 0  # Will be set in predict_chunk_size
         }
-        # chunk size will be added in the predict chunk size function
         return xgboost_features
     
     def predict_chunk_size(self, file_path, model_type: Optional[str]="rf") -> int:
@@ -190,7 +192,8 @@ class ChunkSizeOptimizer:
                     return optimal_chunk_size
                 case "xgb":
                     xgb_features = self.convert_features_to_xgboost_format(features)
-                    xgb_features['chunk_size'] = current_chunk_size * 1024  # Add chunk size in bytes
+                    xgb_features['file_path'] = file_path  # Set the actual file path
+                    xgb_features['chunk_size_KB'] = current_chunk_size  # Use KB instead of bytes
                     xgb_df = pd.DataFrame([xgb_features])
                     print(f"xgb_df : {xgb_df}")
                     # XGBoost directly returns the predicted chunk size
