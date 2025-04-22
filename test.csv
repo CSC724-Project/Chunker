@@ -1,6 +1,5 @@
 file_path,file_size_KB,chunk_size_KB,access_count,avg_read_KB,avg_write_KB,max_read_KB,max_write_KB,read_ops,write_ops,throughput_KBps,error_message
-/mnt/beegfs/testfile_5_8XLQHa.dat,5120,64,15,26.00,39.70,43,55,5,10,67533.64,
-/mnt/beegfs/testfile_1_SsabzA.dat,1024,65536,15,272.60,308.80,444,469,10,5,25552.82,
-/mnt/beegfs/testfile_1_SsabzA.dat,1024,128,22,57.50,79.00,126,80,20,2,23296.45,
-/mnt/beegfs/testfile_1_SsabzA.dat,1024,16384,30,263.65,261.00,437,492,20,10,25643.38,
-/mnt/beegfs/testfile_1_SsabzA.dat,1024,128,25,66.80,93.40,121,124,20,5,24179.98,
+/mnt/beegfs/testfile_1_Z7KInK.dat,5120,128,25,92.15,70.4,130,122,20,5,107861.64,
+/mnt/beegfs/testfile_1_Z7KInK.dat,5120,1024,10,283.4,207.4,406,485,5,5,109162.45,
+/mnt/beegfs/testfile_1_Z7KInK.dat,5120,4096,12,219.5,448.5,477,456,10,2,108562.36,
+/mnt/beegfs/testfile_1_Z7KInK.dat,5120,256,30,136.4,144.6,246,224,20,10,91318.66,
