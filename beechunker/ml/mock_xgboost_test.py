@@ -17,31 +17,31 @@ def load_training_data(filepath):
     df = pd.read_csv(filepath)
     
     # Apply column mapping to match the expected column names in XGBoost model
-    column_mapping = {
-        'file_size_KB': 'file_size',
-        'chunk_size_KB': 'chunk_size',
-        'read_ops': 'read_count',
-        'write_ops': 'write_count',
-        'avg_read_KB': 'avg_read_size',
-        'avg_write_KB': 'avg_write_size',
-        'max_read_KB': 'max_read_size',
-        'max_write_KB': 'max_write_size',
-        'throughput_KBps': 'throughput_mbps'
-    }
+    # column_mapping = {
+    #     'file_size_KB': 'file_size',
+    #     'chunk_size_KB': 'chunk_size',
+    #     'read_ops': 'read_count',
+    #     'write_ops': 'write_count',
+    #     'avg_read_KB': 'avg_read_size',
+    #     'avg_write_KB': 'avg_write_size',
+    #     'max_read_KB': 'max_read_size',
+    #     'max_write_KB': 'max_write_size',
+    #     'throughput_KBps': 'throughput_mbps'
+    # }
     
     # Rename columns according to mapping
-    df = df.rename(columns={k: v for k, v in column_mapping.items() if k in df.columns})
+    # df = df.rename(columns={k: v for k, v in column_mapping.items() if k in df.columns})
     
     # Convert KB values to bytes for consistency with the XGBoost model expectations
-    if 'file_size' in df.columns:
-        df['file_size'] = df['file_size'] * 1024  # Convert KB to bytes
-    if 'chunk_size' in df.columns:
-        df['chunk_size'] = df['chunk_size'] * 1024  # Convert KB to bytes
+    # if 'file_size' in df.columns:
+    #     df['file_size'] = df['file_size'] * 1024  # Convert KB to bytes
+    # if 'chunk_size' in df.columns:
+    #     df['chunk_size'] = df['chunk_size'] * 1024  # Convert KB to bytes
     
-    # Filter out rows with errors or missing values
-    df = df.dropna(subset=['file_size', 'chunk_size', 'read_count', 'write_count', 'throughput_mbps'])
-    if 'error_message' in df.columns:
-        df = df[df['error_message'].isna() | (df['error_message'] == '')]
+    # # Filter out rows with errors or missing values
+    # df = df.dropna(subset=['file_size', 'chunk_size', 'read_count', 'write_count', 'throughput_mbps'])
+    # if 'error_message' in df.columns:
+    #     df = df[df['error_message'].isna() | (df['error_message'] == '')]
     
     # Add timestamp if not present (using current time as placeholder)
     if 'timestamp' not in df.columns:
@@ -55,7 +55,7 @@ def load_prediction_data(filepath):
     df = pd.read_csv(filepath)
     
     # Filter out rows with missing values
-    df = df.dropna(subset=['file_size', 'chunk_size', 'read_count', 'write_count', 'throughput_mbps'])
+    # df = df.dropna(subset=['file_size', 'chunk_size', 'read_count', 'write_count', 'throughput_mbps'])
     
     # Add timestamp if not present
     if 'timestamp' not in df.columns:

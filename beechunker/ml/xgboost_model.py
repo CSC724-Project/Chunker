@@ -1,4 +1,5 @@
 import os
+import json
 import logging
 import numpy as np
 import pandas as pd
@@ -25,7 +26,7 @@ class BeeChunkerXGBoost:
         
     def _calculate_io_efficiency(self, df: pd.DataFrame) -> pd.Series:
         """Calculate I/O efficiency metric for each row."""
-        return (df['throughput_mbps'] * 1024 * 1024) / (df['file_size'] * (df['read_count'] + df['write_count']))
+        return (df['throughput_KBps']) / (df['file_size_KB'] * (df['read_ops'] + df['write_ops']))
     
     def _prepare_features(self, df: pd.DataFrame, training: bool = False) -> tuple:
         """
@@ -37,15 +38,19 @@ class BeeChunkerXGBoost:
             tuple: (scaled_features, feature_names)
         """
         try:
-            # Calculate I/O efficiency
-            # df['io_efficiency'] = self._calculate_io_efficiency(df)
-            
             # Base features that are always required
             base_features = [
-                'file_size_KB', 'chunk_size_KB', 'read_count', 'write_count',
-                'avg_read_size_KB', 'avg_write_size_KB', 'max_read_size_KB', 'max_write_size_KB',
-                'throughput_mbps'#, 'io_efficiency'
+                'file_size_KB', 'chunk_size_KB', 'access_count', 
+                'avg_read_KB', 'avg_write_KB', 'max_read_KB', 'max_write_KB',
+                'read_ops', 'write_ops', 'throughput_KBps'
             ]
+            
+            # Check if all required features are present
+            missing_features = [col for col in base_features if col not in df.columns]
+            if missing_features:
+                logger.error(f"Missing required features: {missing_features}")
+                logger.error(f"Available columns: {df.columns.tolist()}")
+                raise ValueError(f"Missing required features: {missing_features}")
             
             # Add time-based features if we're training or if they were used in training
             if training:
@@ -92,8 +97,7 @@ class BeeChunkerXGBoost:
     
     def _label_data(self, df: pd.DataFrame) -> tuple:
         """
-        Label data based on I/O efficiency and throughput using 65th percentile threshold.
-        This is specific to BeeGFS logs where we need to determine optimal chunk sizes.
+        Label data based on throughput using 65th percentile threshold.
         
         Returns:
             tuple: (labeled_dataframe, thresholds_dict)
@@ -102,13 +106,19 @@ class BeeChunkerXGBoost:
             # Calculate I/O efficiency
             # df['io_efficiency'] = self._calculate_io_efficiency(df)
             
+            # Check if required columns exist
+            if 'throughput_KBps' not in df.columns:
+                logger.error(f"Required column 'throughput_KBps' not found. Available columns: {df.columns.tolist()}")
+                raise ValueError("Missing required column: throughput_KBps")
+                
             # Get 65th percentile thresholds (based on empirical analysis)
             # io_threshold = df['io_efficiency'].quantile(0.65)
-            throughput_threshold = df['throughput_mbps'].quantile(0.65)
+            logger.info(f"Calculating throughput threshold")
+            throughput_threshold = df['throughput_KBps'].quantile(0.65)
+            logger.info(f"Throughput threshold: {throughput_threshold}")
             
-            # Label as optimal (1) if both metrics are above their thresholds
-            df['is_optimal'] = (#(df['io_efficiency'] >= io_threshold) & 
-                              (df['throughput_mbps'] >= throughput_threshold)).astype(int)
+            # Label as optimal (1) if throughput is above threshold
+            df['is_optimal'] = (df['throughput_KBps'] >= throughput_threshold).astype(int)
             
             # Log labeling statistics
             optimal_count = df['is_optimal'].sum()
@@ -176,10 +186,21 @@ class BeeChunkerXGBoost:
             
             # Load and clean data
             df = pd.read_csv(log_path)
+            logger.info(f"Loaded data with {len(df)} rows and columns: {df.columns.tolist()}")
             
-            # Clean data
-            df = df.dropna(subset=['file_size', 'chunk_size', 'read_count', 'write_count', 
-                                 'throughput_mbps'])
+            # Check for required columns
+            required_columns = ['file_path', 'file_size_KB', 'chunk_size_KB', 'throughput_KBps']
+            missing_columns = [col for col in required_columns if col not in df.columns]
+            if missing_columns:
+                logger.error(f"Missing required columns: {missing_columns}")
+                logger.error(f"Available columns: {df.columns.tolist()}")
+                return False
+            
+            # Clean data - remove rows with missing values in essential columns
+            original_len = len(df)
+            df = df.dropna(subset=['file_size_KB', 'chunk_size_KB', 'throughput_KBps'])
+            if len(df) < original_len:
+                logger.info(f"Removed {original_len - len(df)} rows with missing values in essential columns")
             
             # Label the data based on I/O efficiency and throughput
             try:
@@ -189,11 +210,15 @@ class BeeChunkerXGBoost:
                 return False
             
             # Prepare features
-            X, feature_names = self._prepare_features(df, training=True)
-            y = df['is_optimal']
+            try:
+                X, feature_names = self._prepare_features(df, training=True)
+                y = df['is_optimal']
+            except Exception as e:
+                logger.error(f"Failed to prepare features: {e}")
+                return False
             
             # Initialize K-fold
-            n_splits = 5
+            n_splits = min(5, len(df))  # Ensure we don't try more splits than samples
             kf = KFold(n_splits=n_splits, shuffle=True, random_state=42)
             
             # Initialize metrics storage
@@ -275,7 +300,6 @@ class BeeChunkerXGBoost:
             }
             
             with open(os.path.join(self.models_dir, "xgboost_model_info.json"), "w") as f:
-                import json
                 json.dump(model_info, f, indent=4)
             
             # Set last training time
@@ -312,68 +336,84 @@ class BeeChunkerXGBoost:
                 if not self.load():
                     raise RuntimeError("Model not loaded")
             
+            # Verify required columns
+            required_columns = ['file_path', 'file_size_KB', 'chunk_size_KB', 'throughput_KBps']
+            missing_columns = [col for col in required_columns if col not in df.columns]
+            if missing_columns:
+                logger.error(f"Missing required columns for prediction: {missing_columns}")
+                logger.error(f"Available columns: {df.columns.tolist()}")
+                return None
+            
             # Define chunk size options (in KB)
-            chunk_size_options = [128, 256, 512, 1024, 2048, 4096, 8192]
+            chunk_size_options = [64, 128, 256, 512, 1024, 2048, 4096, 8192]
             results = []
             
             # Process each file
             for idx, row in df.iterrows():
-                current_chunk_kb = row['chunk_size'] // 1024
-                file_features = row.copy()
-                
-                # First, evaluate current chunk size
-                X_current, _ = self._prepare_features(pd.DataFrame([file_features]), training=False)
-                dtest_current = xgb.DMatrix(X_current, feature_names=self.feature_names)
-                current_prob = self.model.predict(dtest_current)[0]
-                
-                if current_prob >= 0.5:
-                    # Current chunk size is predicted to be optimal
-                    optimal_chunk_size = current_chunk_kb
-                    optimal_prob = current_prob
-                else:
-                    # Test different chunk sizes
-                    test_chunks = []
-                    for chunk_size in chunk_size_options:
-                        test_row = file_features.copy()
-                        test_row['chunk_size'] = chunk_size * 1024  # Convert KB to bytes
-                        test_chunks.append(test_row)
+                try:
+                    current_chunk_kb = row['chunk_size_KB']
+                    file_features = row.copy()
                     
-                    # Prepare features for all test chunks
-                    test_df = pd.DataFrame(test_chunks)
-                    X_test, _ = self._prepare_features(test_df, training=False)
-                    dtest = xgb.DMatrix(X_test, feature_names=self.feature_names)
+                    # First, evaluate current chunk size
+                    X_current, _ = self._prepare_features(pd.DataFrame([file_features]), training=False)
+                    dtest_current = xgb.DMatrix(X_current, feature_names=self.feature_names)
+                    current_prob = self.model.predict(dtest_current)[0]
                     
-                    # Get probabilities for each chunk size
-                    chunk_probs = self.model.predict(dtest)
+                    if current_prob >= 0.5:
+                        # Current chunk size is predicted to be optimal
+                        optimal_chunk_size = current_chunk_kb
+                        optimal_prob = current_prob
+                    else:
+                        # Test different chunk sizes
+                        test_chunks = []
+                        for chunk_size in chunk_size_options:
+                            test_row = file_features.copy()
+                            test_row['chunk_size_KB'] = chunk_size
+                            test_chunks.append(test_row)
+                        
+                        # Prepare features for all test chunks
+                        test_df = pd.DataFrame(test_chunks)
+                        X_test, _ = self._prepare_features(test_df, training=False)
+                        dtest = xgb.DMatrix(X_test, feature_names=self.feature_names)
+                        
+                        # Get probabilities for each chunk size
+                        chunk_probs = self.model.predict(dtest)
+                        
+                        # Find the chunk size with highest probability
+                        best_idx = np.argmax(chunk_probs)
+                        optimal_chunk_size = chunk_size_options[best_idx]
+                        optimal_prob = chunk_probs[best_idx]
                     
-                    # Find the chunk size with highest probability
-                    best_idx = np.argmax(chunk_probs)
-                    optimal_chunk_size = chunk_size_options[best_idx]
-                    optimal_prob = chunk_probs[best_idx]
-                
-                # Store results
-                results.append({
-                    'file_path': row['file_path'],
-                    'file_size': row['file_size'],
-                    'current_chunk_size': current_chunk_kb,
-                    'current_probability': current_prob,
-                    'predicted_chunk_size': optimal_chunk_size,
-                    'predicted_probability': optimal_prob,
-                    'is_current_optimal': current_prob >= 0.5,
-                    'needs_optimization': current_chunk_kb != optimal_chunk_size,
-                    'optimization_gain': optimal_prob - current_prob if current_chunk_kb != optimal_chunk_size else 0
-                })
-                
-                logger.debug(f"File: {row['file_path']}, "
-                           f"Current: {current_chunk_kb}KB (prob: {current_prob:.3f}), "
-                           f"Optimal: {optimal_chunk_size}KB (prob: {optimal_prob:.3f})")
+                    # Store results
+                    results.append({
+                        'file_path': row['file_path'],
+                        'file_size_KB': row['file_size_KB'],
+                        'current_chunk_size': current_chunk_kb,
+                        'current_probability': current_prob,
+                        'predicted_chunk_size': optimal_chunk_size,
+                        'predicted_probability': optimal_prob,
+                        'is_current_optimal': current_prob >= 0.5,
+                        'needs_optimization': current_chunk_kb != optimal_chunk_size,
+                        'optimization_gain': optimal_prob - current_prob if current_chunk_kb != optimal_chunk_size else 0
+                    })
+                    
+                    logger.debug(f"File: {row['file_path']}, "
+                               f"Current: {current_chunk_kb}KB (prob: {current_prob:.3f}), "
+                               f"Optimal: {optimal_chunk_size}KB (prob: {optimal_prob:.3f})")
+                except Exception as e:
+                    logger.error(f"Error processing file {row.get('file_path', 'unknown')}: {e}")
+                    # Continue with the next file instead of failing the entire prediction
             
+            if not results:
+                logger.error("No valid prediction results were generated")
+                return None
+                
             results_df = pd.DataFrame(results)
             
             # Log summary statistics
             needs_opt = results_df['needs_optimization'].sum()
             total = len(results_df)
-            avg_gain = results_df[results_df['needs_optimization']]['optimization_gain'].mean()
+            avg_gain = results_df[results_df['needs_optimization']]['optimization_gain'].mean() if needs_opt > 0 else 0
             
             logger.info(f"Prediction complete: {needs_opt}/{total} files need optimization")
             if needs_opt > 0:
