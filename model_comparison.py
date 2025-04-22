@@ -190,47 +190,7 @@ class BeeChunkerModelComparison:
                     )
                 except subprocess.SubprocessError:
                     pass
-                
-            # Insert additional simulated events into the database to augment the actual operations
-            timestamp = time.time()
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-            
-            # Check if file_metadata exists
-            cursor.execute("SELECT 1 FROM file_metadata WHERE file_path = ?", (file_path,))
-            if not cursor.fetchone():
-                # Insert file metadata if not exists
-                cursor.execute(
-                    "INSERT INTO file_metadata (file_path, file_size, chunk_size, first_seen, last_seen) "
-                    "VALUES (?, ?, ?, ?, ?)",
-                    (file_path, file_size, current_chunk_size * 1024, timestamp, timestamp)
-                )
-            
-            # Insert simulated access events
-            for i in range(read_count):
-                cursor.execute(
-                    "INSERT INTO file_access (file_path, access_type, access_time, read_size, write_size) "
-                    "VALUES (?, ?, ?, ?, ?)",
-                    (file_path, "read", timestamp - random.uniform(0, 3600), read_size, 0)
-                )
-                
-            for i in range(write_count):
-                cursor.execute(
-                    "INSERT INTO file_access (file_path, access_type, access_time, read_size, write_size) "
-                    "VALUES (?, ?, ?, ?, ?)",
-                    (file_path, "write", timestamp - random.uniform(0, 3600), 0, write_size)
-                )
-                
-            # Insert throughput metrics
-            cursor.execute(
-                "INSERT INTO throughput_metrics (file_path, start_time, end_time, bytes_transferred, operation_type, throughput_mbps) "
-                "VALUES (?, ?, ?, ?, ?, ?)",
-                (file_path, timestamp - 3600, timestamp, file_size, "read", base_throughput * random.uniform(0.8, 1.2))
-            )
-            
-            conn.commit()
-            conn.close()
-                
+                    
             print(f"Simulated {read_count} reads and {write_count} writes with {access_pattern} pattern")
             
         except Exception as e:
