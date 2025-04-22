@@ -215,20 +215,20 @@ class BeeChunkerXGBoost:
             df = df.rename(columns=column_mapping)
 
             # Convert units (KB to bytes and KBps to MBps)
-            if "file_size" in df.columns:
-                df["file_size"] *= 1024  # Convert KB to bytes
-            if "chunk_size" in df.columns:
-                df["chunk_size"] *= 1024  # Convert KB to bytes
-            if "avg_read_size" in df.columns:
-                df["avg_read_size"] *= 1024  # Convert KB to bytes
-            if "avg_write_size" in df.columns:
-                df["avg_write_size"] *= 1024  # Convert KB to bytes
-            if "max_read_size" in df.columns:
-                df["max_read_size"] *= 1024  # Convert KB to bytes
-            if "max_write_size" in df.columns:
-                df["max_write_size"] *= 1024  # Convert KB to bytes
-            if "throughput_mbps" in df.columns:
-                df["throughput_mbps"] /= 1024  # Convert KBps to MBps
+            # if "file_size" in df.columns:
+            #     df["file_size"] *= 1024  # Convert KB to bytes
+            # if "chunk_size" in df.columns:
+            #     df["chunk_size"] *= 1024  # Convert KB to bytes
+            # if "avg_read_size" in df.columns:
+            #     df["avg_read_size"] *= 1024  # Convert KB to bytes
+            # if "avg_write_size" in df.columns:
+            #     df["avg_write_size"] *= 1024  # Convert KB to bytes
+            # if "max_read_size" in df.columns:
+            #     df["max_read_size"] *= 1024  # Convert KB to bytes
+            # if "max_write_size" in df.columns:
+            #     df["max_write_size"] *= 1024  # Convert KB to bytes
+            # if "throughput_mbps" in df.columns:
+            #     df["throughput_mbps"] /= 1024  # Convert KBps to MBps
 
             # Clean data
             required_columns = [
@@ -426,16 +426,23 @@ class BeeChunkerXGBoost:
             test_chunks = []
             for chunk_size in chunk_size_options:
                 test_row = file_features.copy()
-                test_row["chunk_size"] = chunk_size * 1024  # Convert KB to bytes
+                test_row["chunk_size"] = chunk_size
                 test_chunks.append(test_row)
 
             # Prepare features for all test chunks
             test_df = pd.DataFrame(test_chunks)
             X_test, _ = self._prepare_features(test_df, training=False)
             dtest = xgb.DMatrix(X_test, feature_names=self.feature_names)
+            print(f"X_test: {X_test}")
+            # print(f"Feature names: {self.feature_names}")
+            print(f"Test DataFrame: {test_df}")
+            print(f"Test DMatrix: {dtest.get_label()}")
+            print(f"Feature Names: {dtest.feature_names}")
+            
 
             # Get probabilities for each chunk size
             chunk_probs = self.model.predict(dtest)
+            print(chunk_probs)
 
             # Find the chunk size with highest probability
             best_idx = np.argmax(chunk_probs)

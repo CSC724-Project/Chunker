@@ -18,7 +18,7 @@ def reset_display():
 def main():
     """Train the BeeChunkerXGBoost model on the training dataset."""
     xgb = BeeChunkerXGBoost()
-    df = pd.read_csv("/home/jgajbha/BeeChunker/train.csv")
+    df = pd.read_csv("/home/jgajbha/BeeChunker/test_results28k_filtered.csv")
 
     configure_display()
 
@@ -42,4 +42,5 @@ def predict():
 
 
 if __name__ == "__main__":
+    main()
     predict()

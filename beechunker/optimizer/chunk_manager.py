@@ -181,7 +181,13 @@ class ChunkSizeOptimizer:
                 case "rf":
                     # RF expects KB values
                     df['chunk_size_KB'] = current_chunk_size
-                    predictions = self.rf.predict(df)
+                    # RF excepts an error_message column
+                    df['error_message'] = ""
+                    # RF now returns the optimal chunk size in KB
+                    optimal_chunk_size = self.rf.predict(df)
+                    if optimal_chunk_size is None:
+                        raise ValueError("Random Forest prediction failed")
+                    return optimal_chunk_size
                 case "xgb":
                     xgb_features = self.convert_features_to_xgboost_format(features)
                     xgb_features['chunk_size'] = current_chunk_size * 1024  # Add chunk size in bytes
