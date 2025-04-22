@@ -76,3 +76,33 @@ The script generates:
 This detailed analysis helps BeeGFS administrators make evidence-based decisions about which model to deploy for optimal file system performance based on their specific workloads and usage patterns.
 
 # Results
+=== Final Model Comparison ===
++---------------------+------------------+-----------------------+----------+
+| Category            | RF Performance   | XGBoost Performance   | Winner   |
++=====================+==================+=======================+==========+
+| Overall Performance | 12.99%           | 28.96%                | XGBoost  |
++---------------------+------------------+-----------------------+----------+
+| 10MB Files          | 13.04%           | 22.38%                | XGBoost  |
++---------------------+------------------+-----------------------+----------+
+| 100MB Files         | 20.12%           | 28.03%                | XGBoost  |
++---------------------+------------------+-----------------------+----------+
+| 1024MB Files        | 5.81%            | 36.48%                | XGBoost  |
++---------------------+------------------+-----------------------+----------+
+| Mixed Access        | 27.01%           | 32.85%                | XGBoost  |
++---------------------+------------------+-----------------------+----------+
+| Random Access       | 6.22%            | 29.10%                | XGBoost  |
++---------------------+------------------+-----------------------+----------+
+| Read Heavy Access   | 9.75%            | 27.81%                | XGBoost  |
++---------------------+------------------+-----------------------+----------+
+| Sequential Access   | 0.98%            | 26.15%                | XGBoost  |
++---------------------+------------------+-----------------------+----------+
+| Write Heavy Access  | 20.98%           | 28.91%                | XGBoost  |
++---------------------+------------------+-----------------------+----------+
+| Read Operations     | 15.63%           | 35.14%                | XGBoost  |
++---------------------+------------------+-----------------------+----------+
+| Write Operations    | 7.00%            | 14.04%                | XGBoost  |
++---------------------+------------------+-----------------------+----------+
+
+=== Final Verdict ===
+XGBoost wins in 11 out of 11 categories!
+XGBoost provides better overall chunk size optimization.
