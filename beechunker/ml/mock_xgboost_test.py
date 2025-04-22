@@ -94,6 +94,19 @@ def test_xgboost_pipeline():
         logger.error("Failed to train model")
         return False
     
+    # Log model file locations
+    model_dir = config.get("ml", "models_dir")
+    model_path = os.path.join(model_dir, "xgboost_model.json")
+    scaler_path = os.path.join(model_dir, "xgboost_scaler.joblib")
+    model_info_path = os.path.join(model_dir, "xgboost_model_info.json")
+    
+    if os.path.exists(model_path):
+        logger.info(f"Model saved to: {os.path.abspath(model_path)}")
+    if os.path.exists(scaler_path):
+        logger.info(f"Scaler saved to: {os.path.abspath(scaler_path)}")
+    if os.path.exists(model_info_path):
+        logger.info(f"Model info saved to: {os.path.abspath(model_info_path)}")
+    
     # Load real prediction data
     predict_data_path = os.path.join("data", "logs", "test.csv")
     test_df = load_prediction_data(predict_data_path)

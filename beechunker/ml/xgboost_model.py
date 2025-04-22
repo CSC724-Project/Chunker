@@ -281,26 +281,26 @@ class BeeChunkerXGBoost:
             
             model_path = os.path.join(self.models_dir, "xgboost_model.json")
             scaler_path = os.path.join(self.models_dir, "xgboost_scaler.joblib")
+            feature_path = os.path.join(self.models_dir, "xgboost_model_info.json")
             
+            # Save the model, scaler, and feature information
             self.model.save_model(model_path)
             dump(self.scaler, scaler_path)
             
-            # Save model info
+            # Save feature names and additional model information
             model_info = {
-                'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                'metrics': {
-                    name: {
-                        'mean': float(np.mean(values)),
-                        'std': float(np.std(values))
-                    } for name, values in metrics.items()
-                },
-                'parameters': params,
-                'features': feature_names,
-                'labeling_thresholds': thresholds
+                'features': feature_names if isinstance(feature_names, list) else feature_names.tolist(),
+                'thresholds': thresholds,
+                'trained_at': datetime.now().isoformat(),
+                'metrics': {k: float(np.mean(v)) for k, v in metrics.items()}
             }
             
-            with open(os.path.join(self.models_dir, "xgboost_model_info.json"), "w") as f:
-                json.dump(model_info, f, indent=4)
+            with open(feature_path, 'w') as f:
+                json.dump(model_info, f, indent=2)
+                
+            logger.info(f"Model saved to {model_path}")
+            logger.info(f"Scaler saved to {scaler_path}")
+            logger.info(f"Model info saved to {feature_path}")
             
             # Set last training time
             self.set_last_training_time()
