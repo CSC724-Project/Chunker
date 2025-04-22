@@ -38,13 +38,13 @@ class BeeChunkerXGBoost:
         """
         try:
             # Calculate I/O efficiency
-            df['io_efficiency'] = self._calculate_io_efficiency(df)
+            # df['io_efficiency'] = self._calculate_io_efficiency(df)
             
             # Base features that are always required
             base_features = [
-                'file_size', 'chunk_size', 'read_count', 'write_count',
-                'avg_read_size', 'avg_write_size', 'max_read_size', 'max_write_size',
-                'throughput_mbps', 'io_efficiency'
+                'file_size_KB', 'chunk_size_KB', 'read_count', 'write_count',
+                'avg_read_size_KB', 'avg_write_size_KB', 'max_read_size_KB', 'max_write_size_KB',
+                'throughput_mbps'#, 'io_efficiency'
             ]
             
             # Add time-based features if we're training or if they were used in training
@@ -100,14 +100,14 @@ class BeeChunkerXGBoost:
         """
         try:
             # Calculate I/O efficiency
-            df['io_efficiency'] = self._calculate_io_efficiency(df)
+            # df['io_efficiency'] = self._calculate_io_efficiency(df)
             
             # Get 65th percentile thresholds (based on empirical analysis)
-            io_threshold = df['io_efficiency'].quantile(0.65)
+            # io_threshold = df['io_efficiency'].quantile(0.65)
             throughput_threshold = df['throughput_mbps'].quantile(0.65)
             
             # Label as optimal (1) if both metrics are above their thresholds
-            df['is_optimal'] = ((df['io_efficiency'] >= io_threshold) & 
+            df['is_optimal'] = (#(df['io_efficiency'] >= io_threshold) & 
                               (df['throughput_mbps'] >= throughput_threshold)).astype(int)
             
             # Log labeling statistics
@@ -118,7 +118,7 @@ class BeeChunkerXGBoost:
             
             # Return both the labeled dataframe and the thresholds
             thresholds = {
-                'io_efficiency': float(io_threshold),
+                # 'io_efficiency': float(io_threshold),
                 'throughput': float(throughput_threshold)
             }
             

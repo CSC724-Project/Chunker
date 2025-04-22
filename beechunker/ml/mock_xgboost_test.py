@@ -1,5 +1,6 @@
 import pandas as pd
 import numpy as np
+import json
 from datetime import datetime, timedelta
 import os
 import logging
@@ -10,75 +11,68 @@ from beechunker.common.config import config
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-def create_mock_training_data(num_samples=1000):
-    """Create mock training data similar to BeeGFS logs."""
-    np.random.seed(42)
+def load_training_data(filepath):
+    """Load training data from the test_results28k_filtered.csv file."""
+    logger.info(f"Loading training data from {filepath}")
+    df = pd.read_csv(filepath)
     
-    # Generate random data
-    data = {
-        'file_path': [f"/data/file_{i}.dat" for i in range(num_samples)],
-        'file_size': np.random.randint(1024*1024, 1024*1024*1024, num_samples),  # 1MB to 1GB
-        'chunk_size': np.random.choice([128*1024, 256*1024, 512*1024, 1024*1024], num_samples),  # 128KB to 1MB
-        'read_count': np.random.randint(10, 1000, num_samples),
-        'write_count': np.random.randint(5, 500, num_samples),
-        'avg_read_size': np.random.randint(4096, 1024*1024, num_samples),
-        'avg_write_size': np.random.randint(4096, 1024*1024, num_samples),
-        'max_read_size': np.random.randint(8192, 2*1024*1024, num_samples),
-        'max_write_size': np.random.randint(8192, 2*1024*1024, num_samples),
-        'throughput_mbps': np.random.uniform(50, 500, num_samples)
+    # Apply column mapping to match the expected column names in XGBoost model
+    column_mapping = {
+        'file_size_KB': 'file_size',
+        'chunk_size_KB': 'chunk_size',
+        'read_ops': 'read_count',
+        'write_ops': 'write_count',
+        'avg_read_KB': 'avg_read_size',
+        'avg_write_KB': 'avg_write_size',
+        'max_read_KB': 'max_read_size',
+        'max_write_KB': 'max_write_size',
+        'throughput_KBps': 'throughput_mbps'
     }
     
-    # Add timestamps
-    base_time = datetime.now() - timedelta(days=7)
-    data['timestamp'] = [base_time + timedelta(minutes=i) for i in range(num_samples)]
+    # Rename columns according to mapping
+    df = df.rename(columns={k: v for k, v in column_mapping.items() if k in df.columns})
     
-    # Create DataFrame
-    df = pd.DataFrame(data)
+    # Convert KB values to bytes for consistency with the XGBoost model expectations
+    if 'file_size' in df.columns:
+        df['file_size'] = df['file_size'] * 1024  # Convert KB to bytes
+    if 'chunk_size' in df.columns:
+        df['chunk_size'] = df['chunk_size'] * 1024  # Convert KB to bytes
     
-    # Ensure max sizes are larger than avg sizes
-    df['max_read_size'] = df[['max_read_size', 'avg_read_size']].max(axis=1)
-    df['max_write_size'] = df[['max_write_size', 'avg_write_size']].max(axis=1)
+    # Filter out rows with errors or missing values
+    df = df.dropna(subset=['file_size', 'chunk_size', 'read_count', 'write_count', 'throughput_mbps'])
+    if 'error_message' in df.columns:
+        df = df[df['error_message'].isna() | (df['error_message'] == '')]
+    
+    # Add timestamp if not present (using current time as placeholder)
+    if 'timestamp' not in df.columns:
+        df['timestamp'] = datetime.now()
     
     return df
 
-def create_mock_prediction_data(num_files=5):
-    """Create mock data for prediction testing."""
-    np.random.seed(43)
+def load_prediction_data(filepath):
+    """Load prediction data from the combined_logs.csv file."""
+    logger.info(f"Loading prediction data from {filepath}")
+    df = pd.read_csv(filepath)
     
-    # Generate random data for a few files
-    data = {
-        'file_path': [f"/data/test_file_{i}.dat" for i in range(num_files)],
-        'file_size': np.random.randint(1024*1024, 1024*1024*1024, num_files),
-        'chunk_size': np.random.choice([128*1024, 256*1024, 512*1024, 1024*1024], num_files),
-        'read_count': np.random.randint(10, 1000, num_files),
-        'write_count': np.random.randint(5, 500, num_files),
-        'avg_read_size': np.random.randint(4096, 1024*1024, num_files),
-        'avg_write_size': np.random.randint(4096, 1024*1024, num_files),
-        'max_read_size': np.random.randint(8192, 2*1024*1024, num_files),
-        'max_write_size': np.random.randint(8192, 2*1024*1024, num_files),
-        'throughput_mbps': np.random.uniform(50, 500, num_files)
-    }
+    # Filter out rows with missing values
+    df = df.dropna(subset=['file_size', 'chunk_size', 'read_count', 'write_count', 'throughput_mbps'])
     
-    # Add timestamps (same format as training data)
-    base_time = datetime.now()
-    data['timestamp'] = [base_time + timedelta(minutes=i) for i in range(num_files)]
+    # Add timestamp if not present
+    if 'timestamp' not in df.columns:
+        df['timestamp'] = datetime.now()
     
-    df = pd.DataFrame(data)
-    df['max_read_size'] = df[['max_read_size', 'avg_read_size']].max(axis=1)
-    df['max_write_size'] = df[['max_write_size', 'avg_write_size']].max(axis=1)
+    # Take a sample of the data for testing purposes
+    if len(df) > 20:
+        df = df.sample(20, random_state=42)
     
     return df
 
 def test_xgboost_pipeline():
-    """Test the complete XGBoost pipeline."""
+    """Test the complete XGBoost pipeline using real data files."""
     logger.info("Starting XGBoost pipeline test")
     
     # Initialize model
     model = BeeChunkerXGBoost()
-    
-    # Create mock training data
-    train_df = create_mock_training_data()
-    logger.info(f"Created {len(train_df)} training samples")
     
     # Ensure models directory exists in config
     models_dir = os.path.join(os.getcwd(), "models")
@@ -86,25 +80,24 @@ def test_xgboost_pipeline():
     
     # Set required config values
     config.set("ml", "models_dir", models_dir)
-    
-    # Save mock data as CSV (simulating log file)
-    log_path = os.path.join(models_dir, "mock_training_data.csv")
-    train_df.to_csv(log_path, index=False)
-    
-    # Update config to use mock data
-    config.set("ml", "log_path", log_path)
     config.set("ml", "min_training_samples", 50)  # Set minimum training samples
     
-    # Train model
+    # Load real training data
+    train_data_path = os.path.join("data", "logs", "test_results28k_filtered.csv")
+    train_df = load_training_data(train_data_path)
+    logger.info(f"Loaded {len(train_df)} training samples")
+    
+    # Train model directly with DataFrame
     logger.info("Training model...")
-    success = model.train()
+    success = model.train(train_df)
     if not success:
         logger.error("Failed to train model")
         return False
     
-    # Create test data
-    test_df = create_mock_prediction_data()
-    logger.info(f"Created {len(test_df)} test samples")
+    # Load real prediction data
+    predict_data_path = os.path.join("data", "logs", "test.csv")
+    test_df = load_prediction_data(predict_data_path)
+    logger.info(f"Loaded {len(test_df)} test samples")
     
     # Make predictions
     logger.info("Making predictions...")
