@@ -1,4 +1,4 @@
-# BeeChunker Model Comparison Script
+# BeeChunker Model Comparison Script (model_comparison.py)
 
 ## Overview
 
