@@ -350,6 +350,7 @@ class BeeChunkerXGBoost:
             
             current_chunk_kb = row['chunk_size_KB']
             file_features = row.copy()
+            file_size_kb = row['file_size_KB']
             
             # First, evaluate current chunk size
             X_current, _ = self._prepare_features(pd.DataFrame([file_features]), training=False)
@@ -360,9 +361,17 @@ class BeeChunkerXGBoost:
                 # Current chunk size is predicted to be optimal
                 return int(current_chunk_kb)
             else:
-                # Test different chunk sizes
+                # Filter chunk sizes that are smaller than or equal to the file size
+                valid_chunk_sizes = [size for size in chunk_size_options if size <= file_size_kb]
+                
+                # If no valid chunk sizes (all options larger than file), use smallest possible chunk
+                if not valid_chunk_sizes:
+                    logger.info(f"All chunk sizes exceed file size ({file_size_kb} KB), returning smallest valid chunk size")
+                    return min(64, int(file_size_kb))
+                
+                # Test different valid chunk sizes
                 test_chunks = []
-                for chunk_size in chunk_size_options:
+                for chunk_size in valid_chunk_sizes:
                     test_row = file_features.copy()
                     test_row['chunk_size_KB'] = chunk_size
                     test_chunks.append(test_row)
@@ -377,7 +386,7 @@ class BeeChunkerXGBoost:
                 
                 # Find the chunk size with highest probability
                 best_idx = np.argmax(chunk_probs)
-                optimal_chunk_size = chunk_size_options[best_idx]
+                optimal_chunk_size = valid_chunk_sizes[best_idx]
                 
                 return int(optimal_chunk_size)
                 
