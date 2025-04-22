@@ -52,26 +52,6 @@ class BeeChunkerXGBoost:
                 logger.error(f"Available columns: {df.columns.tolist()}")
                 raise ValueError(f"Missing required features: {missing_features}")
             
-            # Add time-based features if we're training or if they were used in training
-            if training:
-                self.use_time_features = 'timestamp' in df.columns
-                if self.use_time_features:
-                    df['hour'] = pd.to_datetime(df['timestamp']).dt.hour
-                    df['day_of_week'] = pd.to_datetime(df['timestamp']).dt.dayofweek
-                    base_features.extend(['hour', 'day_of_week'])
-            else:
-                # For prediction, check if we used time features during training
-                if hasattr(self, 'use_time_features') and self.use_time_features:
-                    if 'timestamp' not in df.columns:
-                        # If time features were used in training but not available for prediction,
-                        # add default values
-                        df['hour'] = 12  # Middle of the day
-                        df['day_of_week'] = 3  # Middle of the week
-                    else:
-                        df['hour'] = pd.to_datetime(df['timestamp']).dt.hour
-                        df['day_of_week'] = pd.to_datetime(df['timestamp']).dt.dayofweek
-                    base_features.extend(['hour', 'day_of_week'])
-            
             # Extract features
             X = df[base_features].copy()
             
@@ -97,28 +77,95 @@ class BeeChunkerXGBoost:
     
     def _label_data(self, df: pd.DataFrame) -> tuple:
         """
-        Label data based on throughput using 65th percentile threshold.
+        Label data based on throughput with sophisticated optimal throughput calculation.
+        Uses a combination-based approach similar to the OptimalThroughputProcessor.
         
         Returns:
             tuple: (labeled_dataframe, thresholds_dict)
         """
         try:
-            # Calculate I/O efficiency
-            # df['io_efficiency'] = self._calculate_io_efficiency(df)
-            
             # Check if required columns exist
-            if 'throughput_KBps' not in df.columns:
-                logger.error(f"Required column 'throughput_KBps' not found. Available columns: {df.columns.tolist()}")
-                raise ValueError("Missing required column: throughput_KBps")
-                
-            # Get 65th percentile thresholds (based on empirical analysis)
-            # io_threshold = df['io_efficiency'].quantile(0.65)
-            logger.info(f"Calculating throughput threshold")
-            throughput_threshold = df['throughput_KBps'].quantile(0.65)
-            logger.info(f"Throughput threshold: {throughput_threshold}")
+            required_columns = ['file_size_KB', 'chunk_size_KB', 'throughput_KBps', 'read_ops', 'write_ops']
+            missing_columns = [col for col in required_columns if col not in df.columns]
+            if missing_columns:
+                logger.error(f"Required columns missing: {missing_columns}. Available: {df.columns.tolist()}")
+                raise ValueError(f"Missing required columns: {missing_columns}")
             
-            # Label as optimal (1) if throughput is above threshold
-            df['is_optimal'] = (df['throughput_KBps'] >= throughput_threshold).astype(int)
+            # Ensure access_count exists
+            if 'access_count' not in df.columns:
+                df['access_count'] = df['read_ops'] + df['write_ops']
+            
+            # Create access_count_label based on access_count ranges
+            df['access_count_label'] = df['access_count'].apply(
+                lambda x: 1 if x <= 10 else (2 if x <= 20 else 3)
+            )
+            
+            # Create combination for grouping
+            df['combination'] = (
+                df['file_size_KB'].astype(str) + ' | ' + 
+                df['access_count_label'].astype(str)
+            )
+            
+            logger.info(f"Created {df['combination'].nunique()} unique file size and access pattern combinations")
+            
+            # Get thresholds for each combination
+            # Use minimum of 3 samples per combination or fall back to global threshold
+            global_threshold = df['throughput_KBps'].quantile(0.65)
+            logger.info(f"Global throughput threshold: {global_threshold:.2f} KBps (65th percentile)")
+            
+            # Initialize threshold column
+            df['threshold'] = 0.0
+            
+            # Calculate thresholds per combination
+            for combo, group in df.groupby('combination'):
+                if len(group) >= 3:
+                    # Use combination-specific threshold if enough samples
+                    combo_threshold = group['throughput_KBps'].quantile(0.65)
+                    df.loc[df['combination'] == combo, 'threshold'] = combo_threshold
+                    logger.info(f"Combination '{combo}': {len(group)} samples, threshold = {combo_threshold:.2f} KBps")
+                else:
+                    # Use global threshold for small groups
+                    df.loc[df['combination'] == combo, 'threshold'] = global_threshold
+                    logger.info(f"Combination '{combo}': only {len(group)} samples, using global threshold")
+            
+            # Set optimal flag based on threshold
+            df['is_optimal'] = (df['throughput_KBps'] >= df['threshold']).astype(int)
+            
+            # Additional chunk size rule: for larger files (>1MB), larger chunks tend to be better
+            large_file_mask = df['file_size_KB'] > 1024
+            file_groups = df[large_file_mask].groupby('file_path')
+            
+            for file_path, file_df in file_groups:
+                if len(file_df) > 1:  # Only if we have multiple chunk sizes for the file
+                    # Among optimal chunks, favor the larger ones for large files
+                    optimal_chunks = file_df[file_df['is_optimal'] == 1]
+                    if len(optimal_chunks) > 1:
+                        # For large files, only keep the larger half of optimal chunk sizes
+                        median_chunk = optimal_chunks['chunk_size_KB'].median()
+                        small_optimal_chunks = optimal_chunks[optimal_chunks['chunk_size_KB'] < median_chunk]
+                        
+                        # Mark smaller chunks as non-optimal
+                        if len(small_optimal_chunks) > 0:
+                            df.loc[small_optimal_chunks.index, 'is_optimal'] = 0
+                            logger.info(f"Large file {file_path}: marked {len(small_optimal_chunks)} smaller chunks as non-optimal")
+            
+            # For small files (<1MB), favor smaller chunks
+            small_file_mask = df['file_size_KB'] <= 1024
+            file_groups = df[small_file_mask].groupby('file_path')
+            
+            for file_path, file_df in file_groups:
+                if len(file_df) > 1:  # Only if we have multiple chunk sizes for the file
+                    # Among optimal chunks, favor the smaller ones for small files
+                    optimal_chunks = file_df[file_df['is_optimal'] == 1]
+                    if len(optimal_chunks) > 1:
+                        # For small files, only keep the smaller half of optimal chunk sizes
+                        median_chunk = optimal_chunks['chunk_size_KB'].median()
+                        large_optimal_chunks = optimal_chunks[optimal_chunks['chunk_size_KB'] > median_chunk]
+                        
+                        # Mark larger chunks as non-optimal
+                        if len(large_optimal_chunks) > 0:
+                            df.loc[large_optimal_chunks.index, 'is_optimal'] = 0
+                            logger.info(f"Small file {file_path}: marked {len(large_optimal_chunks)} larger chunks as non-optimal")
             
             # Log labeling statistics
             optimal_count = df['is_optimal'].sum()
@@ -126,11 +173,25 @@ class BeeChunkerXGBoost:
             logger.info(f"Data labeling complete: {optimal_count}/{total_count} "
                       f"({optimal_count/total_count*100:.2f}%) samples labeled as optimal")
             
-            # Return both the labeled dataframe and the thresholds
+            # Ensure we have both positive and negative examples
+            if optimal_count == 0:
+                logger.warning("No optimal examples found, setting top 25% by throughput as optimal")
+                top_indices = df.nlargest(int(len(df) * 0.25), 'throughput_KBps').index
+                df.loc[top_indices, 'is_optimal'] = 1
+            elif optimal_count == total_count:
+                logger.warning("All examples labeled as optimal, setting bottom 25% by throughput as non-optimal")
+                bottom_indices = df.nsmallest(int(len(df) * 0.25), 'throughput_KBps').index
+                df.loc[bottom_indices, 'is_optimal'] = 0
+            
+            # Return labeled dataframe and thresholds
             thresholds = {
-                # 'io_efficiency': float(io_threshold),
-                'throughput': float(throughput_threshold)
+                'global_throughput': float(global_threshold),
+                'combinations': df['combination'].nunique(),
+                'optimal_ratio': float(optimal_count / total_count)
             }
+            
+            # Clean up temporary columns
+            df.drop(columns=['threshold', 'combination', 'access_count_label'], inplace=True, errors='ignore')
             
             return df, thresholds
             
@@ -242,9 +303,20 @@ class BeeChunkerXGBoost:
             best_model = None
             best_score = float('inf')
             
+            # Print detailed fold header
+            logger.info("\n" + "="*50)
+            logger.info(f"Beginning {n_splits}-fold cross-validation")
+            logger.info("="*50)
+            
             for fold, (train_idx, val_idx) in enumerate(kf.split(X), 1):
                 X_train, X_val = X[train_idx], X[val_idx]
                 y_train, y_val = y[train_idx], y[val_idx]
+                
+                # Print fold details
+                logger.info(f"\nFold {fold}/{n_splits}:")
+                logger.info(f"Training samples: {len(X_train)}, Validation samples: {len(X_val)}")
+                logger.info(f"Positive samples in training: {sum(y_train)} ({sum(y_train)/len(y_train)*100:.1f}%)")
+                logger.info(f"Positive samples in validation: {sum(y_val)} ({sum(y_val)/len(y_val)*100:.1f}%)")
                 
                 dtrain = xgb.DMatrix(X_train, label=y_train, feature_names=feature_names)
                 dval = xgb.DMatrix(X_val, label=y_val, feature_names=feature_names)
@@ -263,6 +335,11 @@ class BeeChunkerXGBoost:
                 val_preds = model.predict(dval)
                 fold_metrics = self._calculate_metrics(y_val, val_preds)
                 
+                # Print fold metrics
+                logger.info("Fold metrics:")
+                for metric_name, value in fold_metrics.items():
+                    logger.info(f"  {metric_name}: {value:.4f}")
+                
                 # Store metrics
                 for metric, value in fold_metrics.items():
                     metrics[metric].append(value)
@@ -271,9 +348,16 @@ class BeeChunkerXGBoost:
                 if fold_metrics['logloss'] < best_score:
                     best_score = fold_metrics['logloss']
                     best_model = model
-                
-                logger.info(f"Fold {fold} - Logloss: {fold_metrics['logloss']:.4f}, "
-                          f"AUC: {fold_metrics['auc']:.4f}")
+                    logger.info(f"  New best model (logloss: {best_score:.4f})")
+            
+            # Print summary of all folds
+            logger.info("\n" + "="*50)
+            logger.info("Cross-validation summary:")
+            for metric, values in metrics.items():
+                mean_value = np.mean(values)
+                std_value = np.std(values)
+                logger.info(f"{metric} = {mean_value:.4f} ± {std_value:.4f}")
+            logger.info("="*50 + "\n")
             
             # Save best model and components
             self.model = best_model
@@ -281,26 +365,26 @@ class BeeChunkerXGBoost:
             
             model_path = os.path.join(self.models_dir, "xgboost_model.json")
             scaler_path = os.path.join(self.models_dir, "xgboost_scaler.joblib")
+            feature_path = os.path.join(self.models_dir, "xgboost_model_info.json")
             
+            # Save the model, scaler, and feature information
             self.model.save_model(model_path)
             dump(self.scaler, scaler_path)
             
-            # Save model info
+            # Save feature names and additional model information
             model_info = {
-                'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                'metrics': {
-                    name: {
-                        'mean': float(np.mean(values)),
-                        'std': float(np.std(values))
-                    } for name, values in metrics.items()
-                },
-                'parameters': params,
-                'features': feature_names,
-                'labeling_thresholds': thresholds
+                'features': feature_names if isinstance(feature_names, list) else feature_names.tolist(),
+                'thresholds': thresholds,
+                'trained_at': datetime.now().isoformat(),
+                'metrics': {k: float(np.mean(v)) for k, v in metrics.items()}
             }
             
-            with open(os.path.join(self.models_dir, "xgboost_model_info.json"), "w") as f:
-                json.dump(model_info, f, indent=4)
+            with open(feature_path, 'w') as f:
+                json.dump(model_info, f, indent=2)
+                
+            logger.info(f"Model saved to {model_path}")
+            logger.info(f"Scaler saved to {scaler_path}")
+            logger.info(f"Model info saved to {feature_path}")
             
             # Set last training time
             self.set_last_training_time()
@@ -342,44 +426,123 @@ class BeeChunkerXGBoost:
                 logger.error(f"Available columns: {df.columns.tolist()}")
                 return None
             
-            # Define chunk size options (in KB)
-            chunk_size_options = [64, 128, 256, 512, 1024, 2048, 4096, 8192]
-            
             # Take the first row in the dataframe 
             row = df.iloc[0]
             
             current_chunk_kb = row['chunk_size_KB']
             file_features = row.copy()
+            file_size_kb = row['file_size_KB']
             
-            # First, evaluate current chunk size
-            X_current, _ = self._prepare_features(pd.DataFrame([file_features]), training=False)
-            dtest_current = xgb.DMatrix(X_current, feature_names=self.feature_names)
-            current_prob = self.model.predict(dtest_current)[0]
+            logger.info(f"Predicting optimal chunk size for file: {row['file_path']}")
+            logger.info(f"File size: {file_size_kb}KB, Current chunk size: {current_chunk_kb}KB")
             
-            if current_prob >= 0.5:
-                # Current chunk size is predicted to be optimal
-                return int(current_chunk_kb)
+            # Use a heuristic approach based on file size to recommend chunk sizes
+            # This provides a better initial estimate before applying the model
+            
+            # For very small files (< 256KB), small chunks (64-128KB) are typically best
+            if file_size_kb < 256:
+                possible_chunks = [64, 128, min(file_size_kb, 256)]
+                logger.info(f"Small file (<256KB): Testing chunk sizes {possible_chunks}")
+            
+            # For small files (256KB-1MB), medium-small chunks (128-512KB) are typically best
+            elif file_size_kb < 1024: 
+                possible_chunks = [64, 128, 256, min(file_size_kb, 512)]
+                logger.info(f"Medium-small file (256KB-1MB): Testing chunk sizes {possible_chunks}")
+            
+            # For medium files (1-4MB), medium chunks (256-1024KB) are typically best
+            elif file_size_kb < 4096:
+                possible_chunks = [128, 256, 512, min(file_size_kb, 1024)]
+                logger.info(f"Medium file (1-4MB): Testing chunk sizes {possible_chunks}")
+            
+            # For large files (4-16MB), medium-large chunks (512-2048KB) are typically best
+            elif file_size_kb < 16384:
+                possible_chunks = [256, 512, 1024, min(file_size_kb, 2048)]
+                logger.info(f"Large file (4-16MB): Testing chunk sizes {possible_chunks}")
+            
+            # For very large files (>16MB), large chunks (1024-8192KB) are typically best
             else:
-                # Test different chunk sizes
-                test_chunks = []
-                for chunk_size in chunk_size_options:
-                    test_row = file_features.copy()
-                    test_row['chunk_size_KB'] = chunk_size
-                    test_chunks.append(test_row)
+                possible_chunks = [512, 1024, 2048, 4096, min(file_size_kb, 8192)]
+                logger.info(f"Very large file (>16MB): Testing chunk sizes {possible_chunks}")
+            
+            # Add current chunk size to the list if it's not already there
+            if current_chunk_kb not in possible_chunks:
+                possible_chunks.append(int(current_chunk_kb))
+                possible_chunks.sort()
+            
+            # Make sure all chunks are <= file size
+            valid_chunk_sizes = [c for c in possible_chunks if c <= file_size_kb]
+            
+            if not valid_chunk_sizes:
+                logger.info(f"No valid chunk sizes for file size {file_size_kb}KB, defaulting to 64KB")
+                return 64  # Default to smallest chunk size
+            
+            logger.info(f"Testing chunk sizes: {valid_chunk_sizes}")
+            
+            # Test different valid chunk sizes
+            test_chunks = []
+            for chunk_size in valid_chunk_sizes:
+                test_row = file_features.copy()
+                test_row['chunk_size_KB'] = chunk_size
+                test_chunks.append(test_row)
+            
+            # Prepare features for all test chunks
+            test_df = pd.DataFrame(test_chunks)
+            X_test, _ = self._prepare_features(test_df, training=False)
+            dtest = xgb.DMatrix(X_test, feature_names=self.feature_names)
+            
+            # Get probabilities for each chunk size
+            chunk_probs = self.model.predict(dtest)
+            
+            # Log probabilities for each chunk size
+            for i, (size, prob) in enumerate(zip(valid_chunk_sizes, chunk_probs)):
+                logger.info(f"Chunk size {size}KB: probability {prob:.4f}")
+            
+            # Select best chunk size
+            best_idx = np.argmax(chunk_probs)
+            best_chunk_size = valid_chunk_sizes[best_idx]
+            best_prob = chunk_probs[best_idx]
+            
+            # Check if current chunk size is in the valid options
+            if current_chunk_kb in valid_chunk_sizes:
+                current_idx = valid_chunk_sizes.index(current_chunk_kb)
+                current_prob = chunk_probs[current_idx]
+                logger.info(f"Current chunk size {current_chunk_kb}KB: probability {current_prob:.4f}")
                 
-                # Prepare features for all test chunks
-                test_df = pd.DataFrame(test_chunks)
-                X_test, _ = self._prepare_features(test_df, training=False)
-                dtest = xgb.DMatrix(X_test, feature_names=self.feature_names)
+                # Make more aggressive recommendations:
+                # 1. Only keep current if it's the absolute best
+                # 2. For files > 1MB, prefer larger chunks
+                # 3. For files < 1MB, prefer smaller chunks
                 
-                # Get probabilities for each chunk size
-                chunk_probs = self.model.predict(dtest)
+                # If current is best, keep it
+                if current_idx == best_idx:
+                    logger.info(f"Current chunk size {current_chunk_kb}KB is optimal")
+                    return int(current_chunk_kb)
                 
-                # Find the chunk size with highest probability
-                best_idx = np.argmax(chunk_probs)
-                optimal_chunk_size = chunk_size_options[best_idx]
+                # For large files, bias toward larger chunks
+                if file_size_kb > 1024:
+                    # If current chunk is too small and not optimal, recommend larger
+                    if current_chunk_kb < best_chunk_size:
+                        logger.info(f"File is large ({file_size_kb}KB), recommending larger chunk: {best_chunk_size}KB")
+                        return int(best_chunk_size)
+                # For small files, bias toward smaller chunks    
+                else:
+                    # If current chunk is too large and not optimal, recommend smaller
+                    if current_chunk_kb > best_chunk_size:
+                        logger.info(f"File is small ({file_size_kb}KB), recommending smaller chunk: {best_chunk_size}KB")
+                        return int(best_chunk_size)
                 
-                return int(optimal_chunk_size)
+                # If difference in probabilities is significant (>0.1), recommend change
+                if best_prob > current_prob + 0.1:
+                    logger.info(f"Significant performance improvement expected with {best_chunk_size}KB")
+                    return int(best_chunk_size)
+                
+                # Otherwise, keep current chunk size to minimize changes
+                logger.info(f"Keeping current chunk size {current_chunk_kb}KB (performance difference not significant)")
+                return int(current_chunk_kb)
+            
+            # Current chunk size not in valid options, return best chunk size
+            logger.info(f"Selected optimal chunk size: {best_chunk_size}KB with probability {best_prob:.4f}")
+            return int(best_chunk_size)
                 
         except Exception as e:
             logger.error(f"Error making predictions: {e}")

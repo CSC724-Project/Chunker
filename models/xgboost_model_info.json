@@ -1,0 +1,28 @@
+{
+  "features": [
+    "file_size_KB",
+    "chunk_size_KB",
+    "access_count",
+    "avg_read_KB",
+    "avg_write_KB",
+    "max_read_KB",
+    "max_write_KB",
+    "read_ops",
+    "write_ops",
+    "throughput_KBps"
+  ],
+  "thresholds": {
+    "global_throughput": 675535.1935,
+    "combinations": 42,
+    "optimal_ratio": 0.1951834463571553
+  },
+  "trained_at": "2025-04-22T01:09:43.029857",
+  "metrics": {
+    "logloss": 0.05992227367283788,
+    "accuracy": 0.9767432694215813,
+    "precision": 0.9429124059503199,
+    "recall": 0.937736219620076,
+    "f1": 0.9402987171359053,
+    "auc": 0.9967011466819571
+  }
+}

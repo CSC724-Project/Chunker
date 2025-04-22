@@ -151,7 +151,7 @@ class ChunkSizeOptimizer:
             'read_ops': features['read_ops'],
             'write_ops': features['write_ops'],
             'access_count': features['access_count'],  # Add access_count feature
-            'throughput_KBps': features['throughput_mbps'] * 1024 / 8,  # Convert Mbps to KBps
+            'throughput_KBps': features['throughput_mbps'],  # Convert Mbps to KBps
             'chunk_size_KB': 0  # Will be set in predict_chunk_size
         }
         return xgboost_features
