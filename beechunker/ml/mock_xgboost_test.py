@@ -122,6 +122,39 @@ def test_xgboost_pipeline():
         logger.info(f"Scaler saved to: {os.path.abspath(scaler_path)}")
     if os.path.exists(model_info_path):
         logger.info(f"Model info saved to: {os.path.abspath(model_info_path)}")
+        
+        # Print model metrics from model_info
+        try:
+            with open(model_info_path, 'r') as f:
+                model_info = json.load(f)
+                
+                if 'metrics' in model_info:
+                    logger.info("\nModel Performance Metrics:")
+                    for metric_name, value in model_info['metrics'].items():
+                        logger.info(f"{metric_name.upper()}: {value:.4f}")
+                    
+                    # Highlight the most important metrics
+                    if 'accuracy' in model_info['metrics']:
+                        accuracy = model_info['metrics']['accuracy']
+                        logger.info(f"\nModel Accuracy: {accuracy:.4f} ({accuracy*100:.2f}%)")
+                    
+                    if 'auc' in model_info['metrics']:
+                        auc = model_info['metrics']['auc']
+                        logger.info(f"Area Under Curve (AUC): {auc:.4f}")
+                        
+                    # Print interpretation of model quality
+                    if 'accuracy' in model_info['metrics']:
+                        accuracy = model_info['metrics']['accuracy']
+                        if accuracy > 0.9:
+                            logger.info("Model quality: Excellent (>90% accuracy)")
+                        elif accuracy > 0.8:
+                            logger.info("Model quality: Good (80-90% accuracy)")
+                        elif accuracy > 0.7:
+                            logger.info("Model quality: Fair (70-80% accuracy)")
+                        else:
+                            logger.info("Model quality: Poor (<70% accuracy)")
+        except Exception as e:
+            logger.error(f"Error reading model metrics: {e}")
     
     # Load real prediction data
     predict_data_path = os.path.join("data", "logs", "test.csv")

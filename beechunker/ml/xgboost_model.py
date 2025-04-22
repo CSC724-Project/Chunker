@@ -303,9 +303,20 @@ class BeeChunkerXGBoost:
             best_model = None
             best_score = float('inf')
             
+            # Print detailed fold header
+            logger.info("\n" + "="*50)
+            logger.info(f"Beginning {n_splits}-fold cross-validation")
+            logger.info("="*50)
+            
             for fold, (train_idx, val_idx) in enumerate(kf.split(X), 1):
                 X_train, X_val = X[train_idx], X[val_idx]
                 y_train, y_val = y[train_idx], y[val_idx]
+                
+                # Print fold details
+                logger.info(f"\nFold {fold}/{n_splits}:")
+                logger.info(f"Training samples: {len(X_train)}, Validation samples: {len(X_val)}")
+                logger.info(f"Positive samples in training: {sum(y_train)} ({sum(y_train)/len(y_train)*100:.1f}%)")
+                logger.info(f"Positive samples in validation: {sum(y_val)} ({sum(y_val)/len(y_val)*100:.1f}%)")
                 
                 dtrain = xgb.DMatrix(X_train, label=y_train, feature_names=feature_names)
                 dval = xgb.DMatrix(X_val, label=y_val, feature_names=feature_names)
@@ -324,6 +335,11 @@ class BeeChunkerXGBoost:
                 val_preds = model.predict(dval)
                 fold_metrics = self._calculate_metrics(y_val, val_preds)
                 
+                # Print fold metrics
+                logger.info("Fold metrics:")
+                for metric_name, value in fold_metrics.items():
+                    logger.info(f"  {metric_name}: {value:.4f}")
+                
                 # Store metrics
                 for metric, value in fold_metrics.items():
                     metrics[metric].append(value)
@@ -332,9 +348,16 @@ class BeeChunkerXGBoost:
                 if fold_metrics['logloss'] < best_score:
                     best_score = fold_metrics['logloss']
                     best_model = model
-                
-                logger.info(f"Fold {fold} - Logloss: {fold_metrics['logloss']:.4f}, "
-                          f"AUC: {fold_metrics['auc']:.4f}")
+                    logger.info(f"  New best model (logloss: {best_score:.4f})")
+            
+            # Print summary of all folds
+            logger.info("\n" + "="*50)
+            logger.info("Cross-validation summary:")
+            for metric, values in metrics.items():
+                mean_value = np.mean(values)
+                std_value = np.std(values)
+                logger.info(f"{metric} = {mean_value:.4f} ± {std_value:.4f}")
+            logger.info("="*50 + "\n")
             
             # Save best model and components
             self.model = best_model
