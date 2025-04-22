@@ -1,6 +1,6 @@
 file_path,file_size_KB,chunk_size_KB,access_count,avg_read_KB,avg_write_KB,max_read_KB,max_write_KB,read_ops,write_ops,throughput_KBps,error_message
 /mnt/beegfs/testfile_5_8XLQHa.dat,5120,64,15,26.00,39.70,43,55,5,10,67533.64,
-/mnt/beegfs/testfile_5_UVltnu.dat,1024,128,30,57.7,70.3,130,124,20,10,25624.04,
+/mnt/beegfs/testfile_5_UVltnu.dat,1000000,64,30,57.7,70.3,130,124,20,10,25624.04,
 /mnt/beegfs/testfile_5_UVltnu.dat,1024,256,22,117.05,56.5,249,80,20,2,23971.52,
 /mnt/beegfs/testfile_5_UVltnu.dat,1024,512,22,235.0,68.0,485,75,20,2,25931.37,
 /mnt/beegfs/testfile_5_UVltnu.dat,1024,64,7,36.0,35.5,58,58,5,2,25755.14,

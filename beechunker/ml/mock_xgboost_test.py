@@ -61,6 +61,22 @@ def load_prediction_data(filepath):
     if 'timestamp' not in df.columns:
         df['timestamp'] = datetime.now()
     
+    # Add access_count column if not present
+    if 'access_count' not in df.columns:
+        df['access_count'] = df['read_ops'] + df['write_ops']
+    
+    # Analyze file size distribution
+    logger.info(f"File size distribution: min={df['file_size_KB'].min()}, max={df['file_size_KB'].max()}, " 
+                f"mean={df['file_size_KB'].mean():.2f}, median={df['file_size_KB'].median()}")
+    
+    # Analyze chunk size distribution
+    logger.info(f"Chunk size distribution: min={df['chunk_size_KB'].min()}, max={df['chunk_size_KB'].max()}, " 
+                f"mean={df['chunk_size_KB'].mean():.2f}, median={df['chunk_size_KB'].median()}")
+    
+    # Analyze throughput distribution
+    logger.info(f"Throughput distribution: min={df['throughput_KBps'].min():.2f}, max={df['throughput_KBps'].max():.2f}, " 
+                f"mean={df['throughput_KBps'].mean():.2f}, median={df['throughput_KBps'].median():.2f}")
+    
     # Take a sample of the data for testing purposes
     if len(df) > 20:
         df = df.sample(20, random_state=42)
@@ -142,6 +158,21 @@ def test_xgboost_pipeline():
     if not predictions:
         logger.error("Failed to make any valid predictions")
         return False
+    
+    # Analyze predictions
+    chunk_size_counts = {}
+    for result in predictions:
+        optimal_size = result['optimal_chunk_size']
+        chunk_size_counts[optimal_size] = chunk_size_counts.get(optimal_size, 0) + 1
+    
+    logger.info("\nChunk Size Distribution in Predictions:")
+    for size, count in sorted(chunk_size_counts.items()):
+        percentage = (count / len(predictions)) * 100
+        logger.info(f"Chunk size {size}KB: {count} predictions ({percentage:.1f}%)")
+    
+    # Calculate optimization metrics
+    changed_count = sum(1 for p in predictions if p['needs_optimization'])
+    logger.info(f"\nOptimization needed for {changed_count}/{len(predictions)} files ({changed_count/len(predictions)*100:.1f}%)")
     
     # Print results
     logger.info("\nPrediction Results:")
