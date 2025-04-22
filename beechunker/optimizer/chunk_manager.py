@@ -161,7 +161,6 @@ class ChunkSizeOptimizer:
         try:
             # Get file features
             features = self.get_file_features(file_path)
-            print(f"features : {features}")
             if features is None:
                 raise ValueError(f"Failed to extract features from {file_path}")
             
@@ -195,7 +194,6 @@ class ChunkSizeOptimizer:
                     xgb_features['file_path'] = file_path  # Set the actual file path
                     xgb_features['chunk_size_KB'] = current_chunk_size  # Use KB instead of bytes
                     xgb_df = pd.DataFrame([xgb_features])
-                    print(f"xgb_df : {xgb_df}")
                     # XGBoost directly returns the predicted chunk size
                     optimal_chunk_size = self.xgb.predict(xgb_df)
                     # For XGBoost, we directly have the optimal chunk size

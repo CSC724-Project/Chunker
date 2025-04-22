@@ -17,14 +17,14 @@ class OptimalThroughputProcessor:
     def load_data(self):
         """Loads the CSV into a DataFrame."""
         self.df = pd.read_csv(self.input_csv)
-        print(f"Loaded data from {self.input_csv}, shape = {self.df.shape}")
+        # print(f"Loaded data from {self.input_csv}, shape = {self.df.shape}")
 
     def label_access_count(self):
         """Adds 'access_count_label' based on 'access_count' ranges."""
         self.df['access_count_label'] = self.df['access_count'].apply(
             lambda x: 1 if x <= 10 else (2 if x <= 20 else 3)
         )
-        print("Added 'access_count_label' column.")
+        # print("Added 'access_count_label' column.")
 
     def build_combination(self):
         """Creates the 'combination' column by concatenating file size and access count label."""
@@ -33,7 +33,7 @@ class OptimalThroughputProcessor:
             + ' | '
             + self.df['access_count_label'].astype(str)
         )
-        print("Built 'combination' column.")
+        # print("Built 'combination' column.")
 
     def compute_OT(self):
         """
@@ -51,7 +51,7 @@ class OptimalThroughputProcessor:
         self.df['threshold'] = self.df.groupby('combination')['throughput_KBps'].transform(
             lambda x: x.quantile(0.65) if len(x) >= 1 else None # Calculate quantile if group has at least 1 member
         )
-        print(f"Initial threshold calculation done. Missing thresholds: {self.df['threshold'].isna().sum()}")
+        # print(f"Initial threshold calculation done. Missing thresholds: {self.df['threshold'].isna().sum()}")
 
         # 2. Now fill any missing thresholds (NaN values resulting from small/empty groups)
         if self.df['threshold'].isna().any():
@@ -75,17 +75,17 @@ class OptimalThroughputProcessor:
         # Drop rows where conversion might have failed (optional, depends on desired behavior)
         self.df.dropna(subset=['throughput_KBps', 'threshold'], inplace=True)
 
-        print(f"Comparing throughput (type: {self.df['throughput_KBps'].dtype}) with threshold (type: {self.df['threshold'].dtype})")
+        # print(f"Comparing throughput (type: {self.df['throughput_KBps'].dtype}) with threshold (type: {self.df['threshold'].dtype})")
         self.df['OT'] = (self.df['throughput_KBps'] >= self.df['threshold']).astype(int)
 
         # 4. Clean up
         self.df.drop(columns='threshold', inplace=True)
-        print(f"Computed 'OT' column using the {0.65 * 100}th percentile threshold.")
+        # print(f"Computed 'OT' column using the {0.65 * 100}th percentile threshold.")
     
     def save_data(self):
         """Saves the processed DataFrame to the output CSV."""
         self.df.to_csv(self.output_csv, index=False)
-        print(f"Saved processed data to {self.output_csv}")
+        # print(f"Saved processed data to {self.output_csv}")
 
     def run(self):
         """Executes the full processing pipeline."""

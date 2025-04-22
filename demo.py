@@ -30,6 +30,9 @@ class BeeChunkerDemo:
         
         # Suppress all logs
         logging.getLogger().setLevel(logging.CRITICAL)
+        for logger_name in logging.Logger.manager.loggerDict:
+            if logger_name.startswith('beechunker'):
+                logging.getLogger(logger_name).setLevel(logging.CRITICAL)
         
         # Disable beechunker logging
         for logger_name in logging.Logger.manager.loggerDict:
@@ -47,6 +50,9 @@ class BeeChunkerDemo:
         # Initialize monitoring
         self.file_monitor_handler = FileMonitorHandler(self.db_manager)
         self.mount_points = config.get("beegfs", "mount_points")
+        self.original_stderr = sys.stderr
+        sys.stderr = open(os.devnull, 'w')  # Suppress stderr output
+        
         
         if not self.mount_points:
             print("No BeeGFS mount points configured. Using current directory.")
@@ -118,42 +124,6 @@ class BeeChunkerDemo:
         
         # Simulate the access patterns by directly inserting into the database
         try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-            
-            # Insert file metadata
-            cursor.execute("""
-                INSERT OR REPLACE INTO file_metadata 
-                (file_path, file_size, chunk_size, first_seen, last_seen)
-                VALUES (?, ?, ?, ?, ?)
-            """, (file_path, file_size, current_chunk_size * 1024, time.time(), time.time()))
-            
-            # Simulate read operations
-            for _ in range(read_count):
-                cursor.execute("""
-                    INSERT INTO file_access 
-                    (file_path, access_type, access_time, read_size, write_size)
-                    VALUES (?, ?, ?, ?, ?)
-                """, (file_path, "read", time.time(), read_size, 0))
-            
-            # Simulate write operations
-            for _ in range(write_count):
-                cursor.execute("""
-                    INSERT INTO file_access 
-                    (file_path, access_type, access_time, read_size, write_size)
-                    VALUES (?, ?, ?, ?, ?)
-                """, (file_path, "write", time.time(), 0, write_size))
-            
-            # Insert throughput metrics
-            cursor.execute("""
-                INSERT INTO throughput_metrics 
-                (file_path, start_time, end_time, bytes_transferred, operation_type, throughput_mbps)
-                VALUES (?, ?, ?, ?, ?, ?)
-            """, (file_path, time.time()-1, time.time(), file_size, "read", throughput))
-            
-            conn.commit()
-            conn.close()
-            
             # Trigger manual processing of access information
             try:
                 # Use beegfs-ctl to get file info which might trigger monitoring
@@ -181,7 +151,7 @@ class BeeChunkerDemo:
             except subprocess.CalledProcessError as e:
                 print(f"Warning: Could not trigger BeeGFS monitoring: {e}")
             
-            print(f"Simulated {read_count} reads and {write_count} writes with throughput {throughput} MB/s")
+            print(f"Simulated {read_count} reads and {write_count} writes")
             
         except Exception as e:
             print(f"Error simulating access patterns: {e}")
@@ -193,6 +163,8 @@ class BeeChunkerDemo:
         
         for observer in self.observers:
             observer.join()
+        
+        sys.stderr = self.original_stderr
             
         print("Stopped all observers.")
     
