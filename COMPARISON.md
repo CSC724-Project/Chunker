@@ -81,17 +81,17 @@ This detailed analysis helps BeeGFS administrators make evidence-based decisions
 
 | Category            | RF Performance   | XGBoost Performance   | Winner   |
 |---------------------|------------------|----------------------|----------|
-| Overall Performance | 12.99%           | 28.96%               | XGBoost  |
-| 10MB Files          | 13.04%           | 22.38%               | XGBoost  |
-| 100MB Files         | 20.12%           | 28.03%               | XGBoost  |
-| 1024MB Files        | 5.81%            | 36.48%               | XGBoost  |
-| Mixed Access        | 27.01%           | 32.85%               | XGBoost  |
-| Random Access       | 6.22%            | 29.10%               | XGBoost  |
-| Read Heavy Access   | 9.75%            | 27.81%               | XGBoost  |
-| Sequential Access   | 0.98%            | 26.15%               | XGBoost  |
-| Write Heavy Access  | 20.98%           | 28.91%               | XGBoost  |
-| Read Operations     | 15.63%           | 35.14%               | XGBoost  |
-| Write Operations    | 7.00%            | 14.04%               | XGBoost  |
+| Overall Performance | 7.14%            | 15.83%               | XGBoost  |
+| 10MB Files          | 1.75%            | 11.46%               | XGBoost  |
+| 100MB Files         | 8.36%            | 19.27%               | XGBoost  |
+| 1024MB Files        | 11.31%           | 16.75%               | XGBoost  |
+| Mixed Access        | 8.87%            | 12.82%               | XGBoost  |
+| Random Access       | 12.84%           | 16.35%               | XGBoost  |
+| Read Heavy Access   | 5.85%            | 16.50%               | XGBoost  |
+| Sequential Access   | 4.36%            | 18.79%               | XGBoost  |
+| Write Heavy Access  | 3.78%            | 14.67%               | XGBoost  |
+| Read Operations     | 8.59%            | 18.44%               | XGBoost  |
+| Write Operations    | 3.60%            | 8.81%                | XGBoost  |
 
 ## Final Verdict
 XGBoost wins in 11 out of 11 categories!

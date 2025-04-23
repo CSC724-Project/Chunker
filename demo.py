@@ -429,9 +429,14 @@ class BeeChunkerDemo:
         
         # Define file sizes for testing
         file_sizes = {
-            "small": 1 * 1024 * 1024,        # 10 MB
-            "medium": 500 * 1024 * 1024,      # 500 MB
-            "large": 2 * 1024 * 1024 * 1024   # 2GB
+            # "small": 1.1 * 1024 * 1024,        # 10 MB
+            "very small" : 140 * 1024,
+            "small" : 512 * 1024,
+            "medium" : 2 * 1024 * 1024,
+            "large" : 10 * 1024 *1024,
+            "very large" : 20 * 1024 * 1024
+            # "medium": 100 * 1024 * 1024,      # 500 MB
+           # "large": 2 * 1024 * 1024 * 1024   # 2GB
         }
         
         results = []

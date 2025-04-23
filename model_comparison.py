@@ -104,53 +104,52 @@ class BeeChunkerModelComparison:
         if current_chunk_size is None:
             current_chunk_size = 512  # Default
         
-        # Determine appropriate access patterns for file size and pattern type
-        file_size_mb = file_size / (1024 * 1024)
+        # Convert bytes to KB for file size comparison
+        file_size_kb = file_size / 1024
         
-        # Base parameters
-        if file_size_mb <= 10:  # Small files
+        # Determine appropriate access patterns for file size and pattern type
+        # Modified file size categories and base parameters
+        if file_size_kb <= 10240:  # Small files (<= 10MB)
             base_read_size = 4096
             base_write_size = 4096
-            base_read_count = 10
-            base_write_count = 5
+            # Cap total access count (read+write) to 1-10 for small files
+            max_total_access = 10
             base_throughput = 50.0
-        elif file_size_mb <= 100:  # Medium files
+        elif file_size_kb <= 512000:  # Medium files (10-500 MB)
             base_read_size = 65536
             base_write_size = 32768
-            base_read_count = 20
-            base_write_count = 10
+            # Cap total access count (read+write) to 11-20 for medium files
+            max_total_access = 20
             base_throughput = 150.0
-        else:  # Large files
+        else:  # Large files (> 500 MB)
             base_read_size = 1048576
             base_write_size = 524288
-            base_read_count = 50
-            base_write_count = 20
+            # Cap total access count (read+write) to 21-30 for large files
+            max_total_access = 30
             base_throughput = 300.0
-            
-        # Adjust based on access pattern
+        
+        # Define read/write ratio based on access pattern
         if access_pattern == "read_heavy":
-            read_count = base_read_count * 3
-            write_count = base_write_count // 2
-            read_size = base_read_size * 2
-            write_size = base_write_size
+            read_ratio = 0.75  # 75% reads, 25% writes
         elif access_pattern == "write_heavy":
-            read_count = base_read_count // 2
-            write_count = base_write_count * 3
-            read_size = base_read_size
-            write_size = base_write_size * 2
-        elif access_pattern == "sequential":
-            read_count = base_read_count
-            write_count = base_write_count
+            read_ratio = 0.25  # 25% reads, 75% writes
+        elif access_pattern == "sequential" or access_pattern == "random" or access_pattern == "mixed":
+            read_ratio = 0.5  # 50% reads, 50% writes
+        else:
+            read_ratio = 0.5  # Default to balanced
+        
+        # Calculate read and write counts based on ratio and max total accesses
+        read_count = int(max_total_access * read_ratio)
+        write_count = max_total_access - read_count
+        
+        # Adjust read/write sizes based on access pattern
+        if access_pattern == "sequential":
             read_size = base_read_size * 4
             write_size = base_write_size * 4
         elif access_pattern == "random":
-            read_count = base_read_count * 2
-            write_count = base_write_count * 2
             read_size = base_read_size // 2
             write_size = base_write_size // 2
-        else:  # mixed (default)
-            read_count = base_read_count
-            write_count = base_write_count
+        else:  # mixed, read_heavy, or write_heavy
             read_size = base_read_size
             write_size = base_write_size
         
