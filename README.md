@@ -60,6 +60,8 @@ beechunker/
 
 ## Architecture and Workflow
 
+[image](architecture.png)
+
 BeeChunker consists of three main services that work together:
 
 ### 1. Monitor Service
@@ -574,6 +576,8 @@ The optimizer uses a sophisticated approach to change chunk sizes:
 4. Performs an atomic swap to replace the original file
 5. Records the optimization in the database for tracking
 
+### Models (pre-trained)
+
 ## Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.
@@ -587,3 +591,29 @@ This project is licensed under the Apache License - see the LICENSE file for det
 - BeeGFS team for their excellent parallel filesystem
 - MiniSom library for the Self-Organizing Map implementation
 - The scikit-learn and XGBoost teams for their machine learning libraries
+
+## Team Contributions (Listed either by files or entire directories) (all paths are relative to the root path of BeeChunker)
+
+1. Jayesh Bhagyesh Gajbhar (jgajbha) - 
+- beechunker/cli/
+- beechunker/common/
+- beechunker/custom_types
+- beechunker/ml/feature_engineering.py beechunker/ml/som.py beechunker/ml/visualization.py (These files are not being used in the final implementation)
+- beechunker/monitor/
+- beechunker/optimizer/
+- setup.py
+- demo.py
+- model_comparison.py
+- services/
+- models/chunk_size_map.npy models/som_model.joblib
+
+2. Aryan Gupta (agupta72) -
+- beechunker/ml/random_forest.py
+- beechunker/ml/feature_extraction.py
+- data/
+- models/rf_base.joblib
+- models/rf_model.joblib
+
+3. Tanishq Virendrabhai Todkar (ttodkar)
+- beechunker/ml/xgboost_feature_engine.py
+- beechunker/ml/xgboost_model.py
