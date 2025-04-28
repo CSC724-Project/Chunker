@@ -336,6 +336,109 @@ beechunker-monitor run
 beechunker-optimizer optimize-file /path/to/file
 ```
 
+## Using Pretrained Models
+
+BeeChunker comes with several pretrained models that can be used immediately without having to collect data and train models from scratch. These models are located in the `models/` directory of the repository and include:
+
+- `rf_model.joblib`: The main Random Forest model (recommended for production)
+- `xgboost_model.json`: The experimental XGBoost model
+- `candidate_chunks.joblib`: List of candidate chunk sizes considered by the models
+- `feature_names.joblib`: Feature names used by the models
+- And several supporting model files
+
+### Setting Up Pretrained Models
+
+To use these pretrained models:
+
+1. Create the models directory in your BeeChunker configuration path:
+
+```bash
+sudo mkdir -p /opt/beechunker/data/models
+sudo chown -R $USER:$USER /opt/beechunker/data/models
+```
+
+2. Copy the pretrained models to this directory:
+
+```bash
+# Assuming you're in the BeeChunker root directory
+cp -r models/* /opt/beechunker/data/models/
+```
+
+3. Verify the models are in place:
+
+```bash
+ls -la /opt/beechunker/data/models/
+```
+
+You should see all the model files copied to this location.
+
+### Using Models with the Optimizer
+
+Once the models are in place, you can use them with the optimizer without running the trainer:
+
+```bash
+# Use the Random Forest model (default and recommended)
+python beechunker/cli/optimizer_cli.py optimize-file /path/to/file --model-type rf
+
+# Or try the XGBoost model
+python beechunker/cli/optimizer_cli.py optimize-file /path/to/file --model-type xgb
+```
+
+The optimizer will automatically load the corresponding pretrained model based on the `--model-type` parameter.
+
+### Model Selection Performance Considerations
+
+The pretrained models were developed based on extensive testing across various file sizes and access patterns:
+
+1. **Random Forest (`rf_model.joblib`)**:
+   - Best for general purpose use
+   - Performs well on files from 64KB to 2GB
+   - More consistent predictions
+   - Recommended for most use cases
+
+2. **XGBoost (`xgboost_model.json`)**:
+   - May provide better optimization for very large files (>1GB)
+   - More aggressive in optimization recommendations
+   - Can be used for specialized workloads
+
+### Testing Pretrained Models
+
+You can test the performance of these pretrained models using the provided utility scripts:
+
+```bash
+# Run the demo with the Random Forest model
+python demo.py --model rf
+
+# Run the demo with the XGBoost model 
+python demo.py --model xgb
+
+# Compare both models
+python model_comparison.py
+```
+
+These tests will create sample files, optimize them using the pretrained models, and report performance improvements.
+
+### Customizing or Updating Models
+
+If you wish to customize these models or train new ones based on your specific workload:
+
+1. Run the monitor service for some time to collect real-world access patterns:
+   ```bash
+   python beechunker/cli/monitor_cli.py run
+   ```
+
+2. Export the collected data:
+   ```bash
+   python beechunker/cli/monitor_cli.py export-data --output ~/beechunker_training_data.csv
+   ```
+
+3. Train a custom model:
+   ```bash
+   python beechunker/cli/trainer_cli.py train --input-csv ~/beechunker_training_data.csv
+   ```
+
+Note that due to the current limitations in the trainer service, you may need to manually prepare the data for training.
+
 ## Setting Up Cron Jobs
 
 Although the trainer service currently has limitations with model compatibility, you can still set up a cron job to run the trainer periodically. This may be useful for future versions when these issues are resolved.
@@ -576,8 +679,6 @@ The optimizer uses a sophisticated approach to change chunk sizes:
 3. Copies data from the original file to the new file
 4. Performs an atomic swap to replace the original file
 5. Records the optimization in the database for tracking
-
-### Models (pre-trained)
 
 ## Contributing
 
