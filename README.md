@@ -694,28 +694,46 @@ This project is licensed under the Apache License - see the LICENSE file for det
 - MiniSom library for the Self-Organizing Map implementation
 - The scikit-learn and XGBoost teams for their machine learning libraries
 
-## Team Contributions (Listed either by files or entire directories) (all paths are relative to the root path of BeeChunker)
+## Team Contributions
+This project was developed collaboratively by three team members, each contributing to specific components:
 
-1. Jayesh Bhagyesh Gajbhar (jgajbha) - 
-- beechunker/cli/
-- beechunker/common/
-- beechunker/custom_types
-- beechunker/ml/feature_engineering.py beechunker/ml/som.py beechunker/ml/visualization.py (These files are not being used in the final implementation)
-- beechunker/monitor/
-- beechunker/optimizer/
-- setup.py
-- demo.py
-- model_comparison.py
-- services/
-- models/chunk_size_map.npy models/som_model.joblib
+### Jayesh Bhagyesh Gajbhar (jgajbha)
+#### Core System Architecture & Implementation:
 
-2. Aryan Gupta (agupta72) -
-- beechunker/ml/random_forest.py
-- beechunker/ml/feature_extraction.py
-- data/
-- models/rf_base.joblib
-- models/rf_model.joblib
+- Complete CLI structure and services integration (beechunker/cli/)
+- System fundamentals and configuration (beechunker/common/)
+- Custom data types and events (beechunker/custom_types/)
+- Monitoring system for file access patterns (beechunker/monitor/)
+- Chunk size optimization implementation (beechunker/optimizer/)
+- System packaging and deployment (setup.py)
 
-3. Tanishq Virendrabhai Todkar (ttodkar)
-- beechunker/ml/xgboost_feature_engine.py
-- beechunker/ml/xgboost_model.py
+#### Utilities & Testing:
+
+- Performance demonstration tool (demo.py)
+- Model comparison framework (model_comparison.py)
+- Service deployment examples (services/)
+
+#### Initial ML Research (deprecated):
+
+- Feature engineering pipeline (beechunker/ml/feature_engineering.py)
+- Self-Organizing Maps prototype (beechunker/ml/som.py, models/som_model.joblib)
+- Visualization utilities (beechunker/ml/visualization.py)
+
+### Aryan Gupta (agupta72)
+#### Production ML Model:
+
+- Random Forest implementation (beechunker/ml/random_forest.py)
+- Feature extraction framework (beechunker/ml/feature_extraction.py)
+- Test dataset creation (data/)
+- Production model training and optimization:
+- 
+- Base Random Forest model (models/rf_base.joblib)
+- Ensemble Random Forest model (models/rf_model.joblib)
+
+
+
+### Tanishq Virendrabhai Todkar (ttodkar)
+#### Production ML Model:
+
+- XGBoost implementation (beechunker/ml/xgboost_model.py)
+- Custom feature engineering for XGBoost (beechunker/ml/xgboost_feature_engine.py)
