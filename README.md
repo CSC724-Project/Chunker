@@ -42,7 +42,8 @@ beechunker/
 │   ├── beechunker_logging.py # Logging setup
 │   ├── config.py           # Configuration management
 │   ├── default_config.json # Default configuration
-│   └── file_access_event.py # File access event class
+├── custom_types/events/
+|   ├── file_access_event.py # File access event class
 ├── ml/                     # Machine learning components
 │   ├── feature_engineering.py # Feature engineering
 │   ├── feature_extraction.py  # Extract features from raw data
