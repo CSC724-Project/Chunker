@@ -60,7 +60,7 @@ beechunker/
 
 ## Architecture and Workflow
 
-[image](architecture.png)
+![BeeChunker Architecture](architecture.png)
 
 BeeChunker consists of three main services that work together:
 
