@@ -546,13 +546,13 @@ The monitor service tracks file operations using the watchdog library and BeeGFS
 
 BeeChunker implements different ML models for chunk size prediction:
 
-1. **Random Forest (RF)** (Recommended for Production):
+1. **Random Forest (RF)** :
    - Ensemble of decision trees for robust classification
    - Stacks multiple RF models for higher accuracy
    - Includes feature importance analysis
    - Most stable and reliable model for production use
 
-2. **XGBoost** (Experimental):
+2. **XGBoost** :
    - Gradient boosting implementation for high accuracy
    - Fast prediction with low memory footprint
    - Handles complex feature interactions well
@@ -562,7 +562,7 @@ BeeChunker implements different ML models for chunk size prediction:
    - Was implemented as a proof of concept only
    - Not intended for production use
    - Included in the codebase for academic purposes only
-   - Should NOT be used for actual chunk size optimization
+   - **Should NOT be used for actual chunk size optimization**
 
 ### Optimizer Implementation
 
@@ -580,7 +580,7 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+This project is licensed under the Apache License - see the LICENSE file for details.
 
 ## Acknowledgments
 
