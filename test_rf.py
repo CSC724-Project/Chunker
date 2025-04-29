@@ -1,41 +1,97 @@
+# test_beechunker_rf.py
+
+import os
 import pandas as pd
 from beechunker.ml.random_forest import BeeChunkerRF
 
-def test_manual_df_predict():
-    # ── Manually define your test DataFrame here ───────────────
-    data = [
-        {
-            'file_path': 'fileA',
-            'file_size_KB': 204800,
-            'chunk_size_KB': 1733,
-            'access_count': 20,
-            'avg_read_KB': 57.7,
-            'avg_write_KB': 70.3,
-            'max_read_KB': 130,
-            'max_write_KB': 124,
-            'read_ops': 12,
-            'write_ops': 8,
-            'throughput_KBps': 25624.04,
-            'error_message': ''
-        }
-    ]
-    df_input = pd.DataFrame(data)
-    print("Input DataFrame:")
-    print(df_input)
+def test_train():
+    """
+    Test the training pipeline of BeeChunkerRF.
+    Loads a sample CSV (or you can swap in a DataFrame) and asserts that training succeeds.
+    """
+    # TODO: point this at a small sample CSV of raw logs that your OptimalThroughputProcessor can handle
+    sample_csv = "/home/agupta72/Chunker/test_results28k_filtered.csv"
+    if not os.path.exists(sample_csv):
+        raise FileNotFoundError(f"Please create a sample file at {sample_csv}")
+    
+    df = pd.read_csv(sample_csv)
+    model = BeeChunkerRF()
+    success = model.train(df)
+    assert success, "🛑 Training failed!"
+    print("✅ Training succeeded")
 
-    # Initialize and load the model
-    predictor = BeeChunkerRF()
-    if not predictor.load():
-        raise RuntimeError("Failed to load trained RF model. Please train the model first.")
-    print("Model loaded successfully.")
+def test_predict():
+    """
+    Test the prediction pipeline of BeeChunkerRF.
+    Loads the trained model from disk and runs predict() on a dummy input row.
+    """
+    model = BeeChunkerRF()
+    loaded = model.load()
+    assert loaded, "🛑 Model not found—run test_train() first!"
+    
+    # build a one‑row DataFrame matching your raw‑log schema
+    df_input = pd.DataFrame([{
+        "file_path": "test_file.bin",
+        "file_size_KB": 1024,
+        "chunk_size_KB": 512,
+        "access_count": 1,
+        "avg_read_KB": 100,
+        "avg_write_KB": 200,
+        "max_read_KB": 150,
+        "max_write_KB": 250,
+        "read_ops": 10,
+        "write_ops": 5,
+        "throughput_KBps": 500,
+        # any non‑numeric columns get dropped automatically
+        "error_message": ""
+    }])
+    
+    best_chunk = model.predict(df_input)
+    print(f"✅ Predicted optimal chunk size: {best_chunk} KB")
 
-    # Run prediction
-    optimal_chunk = predictor.predict(df_input)
-    print("\nOptimal chunk size recommendation (KB):", optimal_chunk)
+if __name__ == "__main__":
+    test_train()
+    # test_predict()
 
 
-if __name__ == '__main__':
-    test_manual_df_predict()
+# import pandas as pd
+# from beechunker.ml.random_forest import BeeChunkerRF
+
+# def test_manual_df_predict():
+#     # ── Manually define your test DataFrame here ───────────────
+#     data = [
+#         {
+#             'file_path': 'fileA',
+#             'file_size_KB': 204800,
+#             'chunk_size_KB': 1733,
+#             'access_count': 20,
+#             'avg_read_KB': 57.7,
+#             'avg_write_KB': 70.3,
+#             'max_read_KB': 130,
+#             'max_write_KB': 124,
+#             'read_ops': 12,
+#             'write_ops': 8,
+#             'throughput_KBps': 25624.04,
+#             'error_message': ''
+#         }
+#     ]
+#     df_input = pd.DataFrame(data)
+#     print("Input DataFrame:")
+#     print(df_input)
+
+#     # Initialize and load the model
+#     predictor = BeeChunkerRF()
+#     if not predictor.load():
+#         raise RuntimeError("Failed to load trained RF model. Please train the model first.")
+#     print("Model loaded successfully.")
+
+#     # Run prediction
+#     optimal_chunk = predictor.predict(df_input)
+#     print("\nOptimal chunk size recommendation (KB):", optimal_chunk)
+
+
+# if __name__ == '__main__':
+#     test_manual_df_predict()
 
 
 

@@ -13,9 +13,12 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import (
     accuracy_score,
+    precision_score,
+    recall_score,
+    f1_score,
+    roc_auc_score,
     classification_report,
     confusion_matrix,
-    roc_auc_score,
 )
 
 from beechunker.common.config import config
@@ -168,17 +171,24 @@ class BeeChunkerRF:
         # eval
         preds = stack.predict(X_test)
         probs = stack.predict_proba(X_test)[:, 1]
+
+        # compute metrics
+        acc     = accuracy_score(y_test, preds)
+        prec    = precision_score(y_test, preds, average='binary')
+        rec     = recall_score(y_test, preds, average='binary')
+        f1      = f1_score(y_test, preds, average='binary')
+        roc_auc = roc_auc_score(y_test, probs)
+
+        # log them all in one line
         logger.info(
-            f"Test Accuracy={accuracy_score(y_test, preds):.4f}, "
-            f"ROC AUC={roc_auc_score(y_test, probs):.4f}"
+            f"Test Accuracy={acc:.4f}, Precision={prec:.4f}, "
+            f"Recall={rec:.4f}, F1={f1:.4f}, ROC AUC={roc_auc:.4f}"
         )
+
+        # and the detailed breakdown
+        logger.info("Classification Report:\n%s", classification_report(y_test, preds))
         logger.info("Confusion Matrix:\n%s", confusion_matrix(y_test, preds))
 
-        # # persist
-        # mpath = os.path.join(self.models_dir, "rf_model.joblib")
-        # joblib.dump(self.model, mpath)
-        # self.set_last_training_time()
-        # logger.info(f"Stacked model saved to {mpath}")
 
         # persist full ensemble
         ensemble_path = os.path.join(self.models_dir, "rf_model.joblib")
