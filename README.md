@@ -694,7 +694,7 @@ This project is licensed under the Apache License - see the LICENSE file for det
 - MiniSom library for the Self-Organizing Map implementation
 - The scikit-learn and XGBoost teams for their machine learning libraries
 
-## Team Contributions
+## Team Contributions (Each contribution has been added by the respective person)
 This project was developed collaboratively by three team members, each contributing to specific components:
 
 ### Jayesh Bhagyesh Gajbhar (jgajbha)
