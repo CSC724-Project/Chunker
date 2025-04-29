@@ -726,7 +726,6 @@ This project was developed collaboratively by three team members, each contribut
 - Feature extraction framework (beechunker/ml/feature_extraction.py)
 - Test dataset creation (data/)
 - Production model training and optimization:
-- 
 - Base Random Forest model (models/rf_base.joblib)
 - Ensemble Random Forest model (models/rf_model.joblib)
 
@@ -737,3 +736,7 @@ This project was developed collaboratively by three team members, each contribut
 
 - XGBoost implementation (beechunker/ml/xgboost_model.py)
 - Custom feature engineering for XGBoost (beechunker/ml/xgboost_feature_engine.py)
+- Production model training and optimization:
+- Base XGBoost model (models/xgboost_model.joblib)
+- Ensemble XGBoost model(models/xgboost_model.joblib)
+- Data Visualizations
