@@ -720,8 +720,16 @@ This project was developed collaboratively by three team members, each contribut
 - Visualization utilities (beechunker/ml/visualization.py)
 
 ### Aryan Gupta (agupta72)
-#### Production ML Model:
 
+#### Base BeeGFS System Setup
+- Script for setting up BeeGFS system
+
+#### Dataset:
+- Data Genration script for ML model training
+- Data pre-processing
+- Data Analysis
+
+#### Production ML Model:
 - Random Forest implementation (beechunker/ml/random_forest.py)
 - Feature extraction framework (beechunker/ml/feature_extraction.py)
 - Test dataset creation (data/)
