@@ -721,7 +721,7 @@ This project was developed collaboratively by three team members, each contribut
 
 ### Aryan Gupta (agupta72)
 
-#### Base BeeGFS System Setup
+#### Base BeeGFS System
 - Setting up the base BeeGFS System by installing and setting-up client kernal module
 - Script for setting up BeeGFS system (Aryan/Build.sh)
 - BeeGFS testing script (Aryan/combined_test.sh)
