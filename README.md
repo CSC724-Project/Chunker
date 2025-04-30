@@ -722,11 +722,14 @@ This project was developed collaboratively by three team members, each contribut
 ### Aryan Gupta (agupta72)
 
 #### Base BeeGFS System Setup
-- Script for setting up BeeGFS system
+- Setting up the base BeeGFS System by installing and setting-up client kernal module
+- Script for setting up BeeGFS system (Aryan/Build.sh)
+- BeeGFS testing script (Aryan/combined_test.sh)
+- BeeGFS I/O test script (Aryan/fio_tests.sh)
 
 #### Dataset:
-- Data Genration script for ML model training
-- Data pre-processing
+- Data Genration script for ML model training (Aryan/beegfs_test.sh)
+- Data pre-processing (beechunker/ml/feature_extraction.py)
 - Data Analysis
 
 #### Production ML Model:
@@ -736,6 +739,9 @@ This project was developed collaboratively by three team members, each contribut
 - Production model training and optimization:
 - Base Random Forest model (models/rf_base.joblib)
 - Ensemble Random Forest model (models/rf_model.joblib)
+- Fine-tuning Random Forest using HGBoost (models/hgb_base.joblib)
+- Candidate Chunks to Map Chunk Size group with File Size (models/candidate_chunks.joblib)
+- Features Names to keep important features consitent throughout (models/feature_names.joblib)
 
 
 
